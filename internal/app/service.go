@@ -36,11 +36,11 @@ func (s *Service) Start(ctx context.Context) (*Running, Report, error) {
 	if current != nil {
 		return current, Report{}, nil
 	}
-	c, err := s.Store.Load()
+	cfg, err := s.Store.Load()
 	if err != nil {
 		return nil, Report{}, fmt.Errorf("load saved configuration: %w", err)
 	}
-	report, err := s.Diagnose(ctx, c)
+	report, err := s.Diagnose(ctx, cfg)
 	if err != nil {
 		return nil, report, err
 	}
@@ -48,10 +48,10 @@ func (s *Service) Start(ctx context.Context) (*Running, Report, error) {
 		return nil, report, err
 	}
 	var refresh proxy.ResolveFunc
-	if c.ManualTargetIP == "" {
-		refresh = func(ctx context.Context) (netip.Addr, error) { return s.refresh(ctx, c) }
+	if cfg.ManualTargetIP == "" {
+		refresh = func(ctx context.Context) (netip.Addr, error) { return s.refresh(ctx, cfg) }
 	}
-	server, err := proxy.Start(c, report.Selected, refresh, s.Logger)
+	server, err := proxy.Start(cfg, report.Selected, refresh, s.Logger)
 	if err != nil {
 		return nil, report, err
 	}
@@ -61,11 +61,11 @@ func (s *Service) Start(ctx context.Context) (*Running, Report, error) {
 		server.Stop(stopCtx)
 		return nil, report, err
 	}
-	running := &Running{Config: c, Server: server}
+	running := &Running{Config: cfg, Server: server}
 	s.mu.Lock()
 	s.running = running
 	s.mu.Unlock()
-	s.Logger.Info("proxy_started", "listen", server.Address(), "distribution", c.Distribution, "upstream", c.TargetEndpoint(report.Selected))
+	s.Logger.Info("proxy_started", "listen", server.Address(), "distribution", cfg.Distribution, "upstream", cfg.TargetEndpoint(report.Selected))
 	return running, report, nil
 }
 

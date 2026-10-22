@@ -61,18 +61,18 @@ type operationMsg struct {
 type tickMsg struct{}
 
 func New(ctx context.Context, service *app.Service, logs *Logs) tea.Model {
-	c, err := service.Store.Load()
-	m := &model{ctx: ctx, service: service, logs: logs, config: c, menu: choiceList(menuItems), distributions: choiceList(nil), width: 80, height: 30}
+	cfg, err := service.Store.Load()
+	uiModel := &model{ctx: ctx, service: service, logs: logs, config: cfg, menu: choiceList(menuItems), distributions: choiceList(nil), width: 80, height: 30}
 	if err != nil {
-		m.config = config.Default()
+		uiModel.config = config.Default()
 		if errors.Is(err, os.ErrNotExist) {
-			m.notice = "Select a WSL distribution, then configure and save."
+			uiModel.notice = "Select a WSL distribution, then configure and save."
 		} else {
-			m.error = err.Error()
-			m.notice = "Saved config is invalid. Review all values before saving."
+			uiModel.error = err.Error()
+			uiModel.notice = "Saved config is invalid. Review all values before saving."
 		}
 	}
-	return m
+	return uiModel
 }
 
 func (m *model) Init() tea.Cmd { return tea.Batch(m.loadDistributions(), tick()) }
@@ -210,9 +210,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.screen = formScreen
 					return m, m.fields[m.focus].Focus()
 				}
-				c := m.config
-				c.Distribution = string(selected)
-				return m, m.save(c)
+				cfg := m.config
+				cfg.Distribution = string(selected)
+				return m, m.save(cfg)
 			}
 			var cmd tea.Cmd
 			m.distributions, cmd = m.distributions.Update(msg)
@@ -238,12 +238,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) updateForm(msg tea.KeyPressMsg) tea.Cmd {
 	switch msg.String() {
 	case "ctrl+s":
-		c, err := m.formConfig()
+		cfg, err := m.formConfig()
 		if err != nil {
 			m.error = err.Error()
 			return nil
 		}
-		return m.save(c)
+		return m.save(cfg)
 	case "enter":
 		if m.focus == 2 {
 			m.returnTo = formScreen
@@ -274,45 +274,45 @@ func (m *model) operationContext(label string) (context.Context, int) {
 	return ctx, m.operation
 }
 func (m *model) start() tea.Cmd {
-	ctx, id := m.operationContext("Resolving WSL, checking TCP and opening Windows listener...")
+	ctx, operationID := m.operationContext("Resolving WSL, checking TCP and opening Windows listener...")
 	service := m.service
 	return func() tea.Msg {
 		running, report, err := service.Start(ctx)
-		return operationMsg{id: id, running: running, report: report, err: err}
+		return operationMsg{id: operationID, running: running, report: report, err: err}
 	}
 }
 func (m *model) stop() tea.Cmd {
-	_, id := m.operationContext("Stopping HTTP server...")
+	_, operationID := m.operationContext("Stopping HTTP server...")
 	service := m.service
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		err := service.Stop(ctx)
-		return operationMsg{id: id, stopped: true, err: err}
+		return operationMsg{id: operationID, stopped: true, err: err}
 	}
 }
 func (m *model) diagnose() tea.Cmd {
-	ctx, id := m.operationContext("Checking WSL addresses and TCP connectivity...")
-	service, c := m.service, m.config
+	ctx, operationID := m.operationContext("Checking WSL addresses and TCP connectivity...")
+	service, cfg := m.service, m.config
 	return func() tea.Msg {
-		report, err := service.Diagnose(ctx, c)
-		return operationMsg{id: id, report: report, err: err}
+		report, err := service.Diagnose(ctx, cfg)
+		return operationMsg{id: operationID, report: report, err: err}
 	}
 }
-func (m *model) save(c config.Config) tea.Cmd {
-	ctx, id := m.operationContext("Validating and saving configuration...")
+func (m *model) save(cfg config.Config) tea.Cmd {
+	ctx, operationID := m.operationContext("Validating and saving configuration...")
 	service := m.service
 	return func() tea.Msg {
-		err := c.Validate()
+		err := cfg.Validate()
 		if err == nil {
-			err = service.WSL.CheckDistribution(ctx, c.Distribution)
+			err = service.WSL.CheckDistribution(ctx, cfg.Distribution)
 		}
 		if err == nil {
 			err = ctx.Err()
 		}
 		if err == nil {
-			err = service.Store.Save(c)
+			err = service.Store.Save(cfg)
 		}
-		return operationMsg{id: id, saved: &c, err: err}
+		return operationMsg{id: operationID, saved: &cfg, err: err}
 	}
 }

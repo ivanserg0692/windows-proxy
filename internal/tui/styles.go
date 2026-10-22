@@ -14,9 +14,9 @@ var danger = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF8F9C"))
 
 func (m *model) View() tea.View {
 	if m.width < 40 || m.height < 20 {
-		v := tea.NewView("WSL PROXY\nResize terminal to at least 40 x 20.\nCtrl+C to exit.")
-		v.AltScreen = true
-		return v
+		view := tea.NewView("WSL PROXY\nResize terminal to at least 40 x 20.\nCtrl+C to exit.")
+		view.AltScreen = true
+		return view
 	}
 	width := min(72, m.width-4)
 	status := "STOPPED"
@@ -51,16 +51,16 @@ func (m *model) View() tea.View {
 		help = "Up/Down: select   Enter: use   R: refresh   Esc: back"
 	case diagnosticsScreen:
 		body = fmt.Sprintf("Windows: %s\nWSL: %s, port %d\n\n", m.config.ListenEndpoint(), safe(m.config.Distribution), m.config.TargetPort)
-		for i, p := range m.report.Probes {
+		for i, probe := range m.report.Probes {
 			if i >= 4 {
 				body += "More addresses found; use manual IP to narrow selection.\n"
 				break
 			}
-			result := fmt.Sprintf("OK (%s)", p.Duration.Round(1000000))
-			if p.Error != "" {
-				result = "FAIL: " + safe(p.Error)
+			result := fmt.Sprintf("OK (%s)", probe.Duration.Round(1000000))
+			if probe.Error != "" {
+				result = "FAIL: " + safe(probe.Error)
 			}
-			body += fmt.Sprintf("%s [%s]: %s\n", p.Candidate.IP, safe(p.Candidate.Interface), result)
+			body += fmt.Sprintf("%s [%s]: %s\n", probe.Candidate.IP, safe(probe.Candidate.Interface), result)
 		}
 		if m.report.Selected.IsValid() {
 			body += "\nSelected: " + m.report.Selected.String()
@@ -94,8 +94,8 @@ func (m *model) View() tea.View {
 	}
 	content += body + "\n\n" + muted.Render(help)
 	frame := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#4C617A")).Padding(1, 2).Width(width - 2).MaxWidth(width).MaxHeight(m.height - 1).Render(content)
-	v := tea.NewView(frame)
-	v.AltScreen = true
-	v.WindowTitle = "WSL Proxy"
-	return v
+	view := tea.NewView(frame)
+	view.AltScreen = true
+	view.WindowTitle = "WSL Proxy"
+	return view
 }

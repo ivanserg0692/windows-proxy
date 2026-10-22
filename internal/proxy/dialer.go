@@ -27,7 +27,7 @@ func (d *connectDialer) DialContext(ctx context.Context, network, _ string) (net
 	d.mu.Lock()
 	ip := d.ip
 	d.mu.Unlock()
-	var last error
+	var lastConnectErr error
 	for attempt := 0; attempt <= d.config.ConnectRetries; attempt++ {
 		if err := ctx.Err(); err != nil {
 			return nil, err
@@ -42,14 +42,14 @@ func (d *connectDialer) DialContext(ctx context.Context, network, _ string) (net
 			}
 			if d.resolve != nil {
 				// Refresh only between failed TCP connects. Discovery never starts a new retry budget.
-				fresh, err := d.resolve(ctx)
+				refreshedIP, err := d.resolve(ctx)
 				if err != nil {
-					return nil, fmt.Errorf("refresh WSL IP after TCP failure: %w (previous connect: %v)", err, last)
+					return nil, fmt.Errorf("refresh WSL IP after TCP failure: %w (previous connect: %v)", err, lastConnectErr)
 				}
-				if err := d.config.CheckTarget(fresh); err != nil {
+				if err := d.config.CheckTarget(refreshedIP); err != nil {
 					return nil, err
 				}
-				ip = fresh
+				ip = refreshedIP
 			}
 			if err := ctx.Err(); err != nil {
 				return nil, err
@@ -66,7 +66,7 @@ func (d *connectDialer) DialContext(ctx context.Context, network, _ string) (net
 			d.stats.setUpstream(ip)
 			return conn, nil
 		}
-		last = err
+		lastConnectErr = err
 	}
-	return nil, fmt.Errorf("TCP connect failed after %d attempt(s): %w", d.config.ConnectRetries+1, last)
+	return nil, fmt.Errorf("TCP connect failed after %d attempt(s): %w", d.config.ConnectRetries+1, lastConnectErr)
 }

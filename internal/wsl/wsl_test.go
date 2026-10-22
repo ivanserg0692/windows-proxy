@@ -28,8 +28,8 @@ func utf16LE(text string, bom bool) []byte {
 	if bom {
 		data = []byte{0xff, 0xfe}
 	}
-	for _, u := range utf16.Encode([]rune(text)) {
-		data = binary.LittleEndian.AppendUint16(data, u)
+	for _, codeUnit := range utf16.Encode([]rune(text)) {
+		data = binary.LittleEndian.AppendUint16(data, codeUnit)
 	}
 	return data
 }

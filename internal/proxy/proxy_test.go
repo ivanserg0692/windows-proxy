@@ -36,26 +36,26 @@ func testConfig(t *testing.T, target string) config.Config {
 	}
 	listenPort := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
-	c := config.Default()
-	c.Distribution = "Ubuntu"
-	c.ListenAddress = "127.0.0.1"
-	c.ListenPort = listenPort
-	c.TargetPort = targetPort
-	return c
+	cfg := config.Default()
+	cfg.Distribution = "Ubuntu"
+	cfg.ListenAddress = "127.0.0.1"
+	cfg.ListenPort = listenPort
+	cfg.TargetPort = targetPort
+	return cfg
 }
 
-func startTestProxy(t *testing.T, c config.Config) *Server {
+func startTestProxy(t *testing.T, cfg config.Config) *Server {
 	t.Helper()
-	s, err := Start(c, netip.MustParseAddr("127.0.0.1"), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	server, err := Start(cfg, netip.MustParseAddr("127.0.0.1"), nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 		defer cancel()
-		s.Stop(ctx)
+		server.Stop(ctx)
 	})
-	return s
+	return server
 }
 
 func TestKeepAliveAndForwarding(t *testing.T) {
@@ -79,10 +79,10 @@ func TestKeepAliveAndForwarding(t *testing.T) {
 	}
 	upstream.Start()
 	defer upstream.Close()
-	s := startTestProxy(t, testConfig(t, upstream.Listener.Addr().String()))
+	server := startTestProxy(t, testConfig(t, upstream.Listener.Addr().String()))
 	client := &http.Client{Timeout: 3 * time.Second}
 	for i := 0; i < 3; i++ {
-		req, _ := http.NewRequest("GET", "http://"+s.Address()+"/path?q=one%20two", nil)
+		req, _ := http.NewRequest("GET", "http://"+server.Address()+"/path?q=one%20two", nil)
 		req.Host = "example.test"
 		req.Header.Set("X-Forwarded-For", "untrusted")
 		response, err := client.Do(req)
@@ -98,7 +98,7 @@ func TestKeepAliveAndForwarding(t *testing.T) {
 	if connections.Load() != 1 {
 		t.Fatalf("keep-alive not used: %d connections", connections.Load())
 	}
-	stats := s.Snapshot()
+	stats := server.Snapshot()
 	if stats.Requests != 3 || stats.Retries != 0 || stats.Failures != 0 {
 		t.Fatalf("stats: %+v", stats)
 	}
@@ -123,15 +123,15 @@ func TestNeverReplayRequestAfterUpstreamDisconnect(t *testing.T) {
 				conn.Close()
 			}))
 			defer upstream.Close()
-			s := startTestProxy(t, testConfig(t, upstream.Listener.Addr().String()))
+			server := startTestProxy(t, testConfig(t, upstream.Listener.Addr().String()))
 			client := &http.Client{Timeout: 3 * time.Second}
-			response, err := client.Get("http://" + s.Address() + "/warm")
+			response, err := client.Get("http://" + server.Address() + "/warm")
 			if err != nil {
 				t.Fatal(err)
 			}
 			io.Copy(io.Discard, response.Body)
 			response.Body.Close()
-			req, _ := http.NewRequest(tc.method, "http://"+s.Address()+"/drop", strings.NewReader(tc.body))
+			req, _ := http.NewRequest(tc.method, "http://"+server.Address()+"/drop", strings.NewReader(tc.body))
 			if tc.key != "" {
 				req.Header.Set("Idempotency-Key", tc.key)
 			}
@@ -147,7 +147,7 @@ func TestNeverReplayRequestAfterUpstreamDisconnect(t *testing.T) {
 			if received.Load() != 1 {
 				t.Fatalf("request replayed %d times", received.Load())
 			}
-			stats := s.Snapshot()
+			stats := server.Snapshot()
 			if stats.Retries != 0 || stats.Failures != 1 {
 				t.Fatalf("stats: %+v", stats)
 			}
@@ -156,13 +156,13 @@ func TestNeverReplayRequestAfterUpstreamDisconnect(t *testing.T) {
 }
 
 func TestTCPRetryBudgetIncludesRefresh(t *testing.T) {
-	c := config.Default()
-	c.Distribution = "Ubuntu"
-	c.ConnectRetries = 2
-	c.RetryDelayMS = 0
+	cfg := config.Default()
+	cfg.Distribution = "Ubuntu"
+	cfg.ConnectRetries = 2
+	cfg.RetryDelayMS = 0
 	var calls, refreshes int
 	stats := &Stats{}
-	d := &connectDialer{config: c, stats: stats, ip: netip.MustParseAddr("172.28.1.2"),
+	dialer := &connectDialer{config: cfg, stats: stats, ip: netip.MustParseAddr("172.28.1.2"),
 		resolve: func(context.Context) (netip.Addr, error) { refreshes++; return netip.MustParseAddr("172.28.1.3"), nil },
 		dial: func(_ context.Context, _, address string) (net.Conn, error) {
 			calls++
@@ -172,7 +172,7 @@ func TestTCPRetryBudgetIncludesRefresh(t *testing.T) {
 			return nil, errors.New("connect refused")
 		},
 	}
-	if _, err := d.DialContext(context.Background(), "tcp4", ""); err == nil {
+	if _, err := dialer.DialContext(context.Background(), "tcp4", ""); err == nil {
 		t.Fatal("expected connect error")
 	}
 	if calls != 3 || refreshes != 2 || stats.Snapshot().Retries != 2 {
@@ -181,33 +181,33 @@ func TestTCPRetryBudgetIncludesRefresh(t *testing.T) {
 }
 
 func TestCancelStopsRetryDelay(t *testing.T) {
-	c := config.Default()
-	c.Distribution = "Ubuntu"
-	c.RetryDelayMS = 10000
+	cfg := config.Default()
+	cfg.Distribution = "Ubuntu"
+	cfg.RetryDelayMS = 10000
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	calls := 0
-	d := &connectDialer{config: c, stats: &Stats{}, ip: netip.MustParseAddr("172.28.1.2"), dial: func(context.Context, string, string) (net.Conn, error) {
+	dialer := &connectDialer{config: cfg, stats: &Stats{}, ip: netip.MustParseAddr("172.28.1.2"), dial: func(context.Context, string, string) (net.Conn, error) {
 		calls++
 		cancel()
 		return nil, errors.New("refused")
 	}}
 	start := time.Now()
-	_, err := d.DialContext(ctx, "tcp4", "")
+	_, err := dialer.DialContext(ctx, "tcp4", "")
 	if !errors.Is(err, context.Canceled) || calls != 1 || time.Since(start) > time.Second {
 		t.Fatalf("cancellation ignored: %d %v", calls, err)
 	}
 }
 
 func TestSuccessfulConnectDoesNotRetry(t *testing.T) {
-	c := config.Default()
-	c.Distribution = "Ubuntu"
+	cfg := config.Default()
+	cfg.Distribution = "Ubuntu"
 	left, right := net.Pipe()
 	defer right.Close()
 	calls := 0
 	stats := &Stats{}
-	d := &connectDialer{config: c, stats: stats, ip: netip.MustParseAddr("172.28.1.2"), dial: func(context.Context, string, string) (net.Conn, error) { calls++; return left, nil }}
-	conn, err := d.DialContext(context.Background(), "tcp4", "")
+	dialer := &connectDialer{config: cfg, stats: stats, ip: netip.MustParseAddr("172.28.1.2"), dial: func(context.Context, string, string) (net.Conn, error) { calls++; return left, nil }}
+	conn, err := dialer.DialContext(context.Background(), "tcp4", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,15 +220,15 @@ func TestSuccessfulConnectDoesNotRetry(t *testing.T) {
 func TestConcurrentRequestsAndStopReleasesPort(t *testing.T) {
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "ok") }))
 	defer upstream.Close()
-	c := testConfig(t, upstream.Listener.Addr().String())
-	s := startTestProxy(t, c)
+	cfg := testConfig(t, upstream.Listener.Addr().String())
+	server := startTestProxy(t, cfg)
 	client := &http.Client{Timeout: 5 * time.Second}
 	var wg sync.WaitGroup
 	for i := 0; i < 64; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			response, err := client.Get("http://" + s.Address())
+			response, err := client.Get("http://" + server.Address())
 			if err != nil {
 				t.Error(err)
 				return
@@ -241,15 +241,15 @@ func TestConcurrentRequestsAndStopReleasesPort(t *testing.T) {
 		}()
 	}
 	wg.Wait()
-	if s.Snapshot().Requests != 64 {
-		t.Fatalf("stats: %+v", s.Snapshot())
+	if server.Snapshot().Requests != 64 {
+		t.Fatalf("stats: %+v", server.Snapshot())
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	if err := s.Stop(ctx); err != nil {
+	if err := server.Stop(ctx); err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("tcp4", c.ListenEndpoint())
+	listener, err := net.Listen("tcp4", cfg.ListenEndpoint())
 	if err != nil {
 		t.Fatalf("port not released: %v", err)
 	}
@@ -261,10 +261,10 @@ func TestClientCancellationReachesUpstream(t *testing.T) {
 	canceled := make(chan struct{})
 	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { close(entered); <-r.Context().Done(); close(canceled) }))
 	defer upstream.Close()
-	s := startTestProxy(t, testConfig(t, upstream.Listener.Addr().String()))
+	server := startTestProxy(t, testConfig(t, upstream.Listener.Addr().String()))
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	req, _ := http.NewRequestWithContext(ctx, "GET", "http://"+s.Address(), nil)
+	req, _ := http.NewRequestWithContext(ctx, "GET", "http://"+server.Address(), nil)
 	finished := make(chan struct{})
 	go func() {
 		defer close(finished)

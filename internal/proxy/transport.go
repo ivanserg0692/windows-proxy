@@ -24,11 +24,11 @@ type transport struct {
 	changed     chan struct{}
 }
 
-func newTransport(d *connectDialer, address string) *transport {
+func newTransport(dialer *connectDialer, address string) *transport {
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	return &transport{
-		base: &http.Transport{DialContext: d.DialContext, Proxy: nil, Protocols: protocols,
+		base: &http.Transport{DialContext: dialer.DialContext, Proxy: nil, Protocols: protocols,
 			DisableCompression: true, ResponseHeaderTimeout: 30 * time.Second,
 			MaxResponseHeaderBytes: 1024 * 1024},
 		address: address, connections: make(map[*http.ClientConn]time.Time), changed: make(chan struct{}, 1),
@@ -36,19 +36,19 @@ func newTransport(d *connectDialer, address string) *transport {
 }
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	cc, err := t.acquire(req.Context())
+	clientConn, err := t.acquire(req.Context())
 	if err != nil {
 		if req.Body != nil {
 			req.Body.Close()
 		}
 		return nil, err
 	}
-	response, err := cc.RoundTrip(req)
+	response, err := clientConn.RoundTrip(req)
 	if err != nil {
 		t.mu.Lock()
-		delete(t.connections, cc)
+		delete(t.connections, clientConn)
 		t.mu.Unlock()
-		cc.Close()
+		clientConn.Close()
 		t.notify()
 		return nil, err
 	}
@@ -65,40 +65,40 @@ func (t *transport) acquire(ctx context.Context) (*http.ClientConn, error) {
 			t.mu.Unlock()
 			return nil, fmt.Errorf("proxy transport is closed")
 		}
-		for cc, used := range t.connections {
-			if cc.Err() != nil || (cc.Available() > 0 && time.Since(used) > idleTimeout) {
-				delete(t.connections, cc)
-				cc.Close()
+		for clientConn, lastUsedAt := range t.connections {
+			if clientConn.Err() != nil || (clientConn.Available() > 0 && time.Since(lastUsedAt) > idleTimeout) {
+				delete(t.connections, clientConn)
+				clientConn.Close()
 				continue
 			}
-			if cc.Available() > 0 && cc.Reserve() == nil {
-				t.connections[cc] = time.Now()
+			if clientConn.Available() > 0 && clientConn.Reserve() == nil {
+				t.connections[clientConn] = time.Now()
 				t.mu.Unlock()
-				return cc, nil
+				return clientConn, nil
 			}
 		}
 		if len(t.connections)+t.creating < maxConnections {
 			t.creating++
 			t.mu.Unlock()
-			cc, err := t.base.NewClientConn(ctx, "http", t.address)
+			clientConn, err := t.base.NewClientConn(ctx, "http", t.address)
 			t.mu.Lock()
 			t.creating--
 			if err == nil && t.closed {
-				cc.Close()
+				clientConn.Close()
 				err = fmt.Errorf("proxy transport is closed")
 			}
 			if err == nil {
-				cc.SetStateHook(func(*http.ClientConn) { t.notify() })
-				err = cc.Reserve()
+				clientConn.SetStateHook(func(*http.ClientConn) { t.notify() })
+				err = clientConn.Reserve()
 				if err == nil {
-					t.connections[cc] = time.Now()
+					t.connections[clientConn] = time.Now()
 				} else {
-					cc.Close()
+					clientConn.Close()
 				}
 			}
 			t.mu.Unlock()
 			t.notify()
-			return cc, err
+			return clientConn, err
 		}
 		t.mu.Unlock()
 		select {
@@ -119,9 +119,9 @@ func (t *transport) notify() {
 func (t *transport) close() {
 	t.mu.Lock()
 	t.closed = true
-	for cc := range t.connections {
-		cc.Close()
-		delete(t.connections, cc)
+	for clientConn := range t.connections {
+		clientConn.Close()
+		delete(t.connections, clientConn)
 	}
 	t.mu.Unlock()
 	t.notify()

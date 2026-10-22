@@ -12,21 +12,21 @@ import (
 
 func TestFormReportsInvalidPortWithoutSaving(t *testing.T) {
 	logs := &Logs{}
-	m := New(context.Background(), &app.Service{Store: config.Store{Path: filepath.Join(t.TempDir(), "config.json")}}, logs).(*model)
-	m.config.Distribution = "Ubuntu"
-	m.openForm()
-	m.fields[1].SetValue("65536")
-	if _, err := m.formConfig(); err == nil {
+	uiModel := New(context.Background(), &app.Service{Store: config.Store{Path: filepath.Join(t.TempDir(), "config.json")}}, logs).(*model)
+	uiModel.config.Distribution = "Ubuntu"
+	uiModel.openForm()
+	uiModel.fields[1].SetValue("65536")
+	if _, err := uiModel.formConfig(); err == nil {
 		t.Fatal("invalid port accepted")
 	}
-	m.fields[1].SetValue("8080")
-	m.fields[4].SetValue("172.28.1.4")
-	c, err := m.formConfig()
+	uiModel.fields[1].SetValue("8080")
+	uiModel.fields[4].SetValue("172.28.1.4")
+	cfg, err := uiModel.formConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if c.ManualTargetIP != "172.28.1.4" {
-		t.Fatalf("manual IP missing: %+v", c)
+	if cfg.ManualTargetIP != "172.28.1.4" {
+		t.Fatalf("manual IP missing: %+v", cfg)
 	}
 }
 
@@ -45,8 +45,8 @@ func TestLogsAreBoundedAndEscapeTerminalControls(t *testing.T) {
 }
 
 func TestSmallTerminalView(t *testing.T) {
-	m := &model{width: 20, height: 10}
-	view := m.View()
+	uiModel := &model{width: 20, height: 10}
+	view := uiModel.View()
 	if !view.AltScreen || !strings.Contains(view.Content, "Resize") {
 		t.Fatalf("unexpected view: %+v", view)
 	}

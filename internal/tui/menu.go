@@ -15,13 +15,13 @@ func choiceList(names []string) list.Model {
 	}
 	delegate := list.NewDefaultDelegate()
 	delegate.ShowDescription = false
-	m := list.New(items, delegate, 60, 8)
-	m.SetShowTitle(false)
-	m.SetShowStatusBar(false)
-	m.SetShowHelp(false)
-	m.SetFilteringEnabled(false)
-	m.DisableQuitKeybindings()
-	return m
+	menu := list.New(items, delegate, 60, 8)
+	menu.SetShowTitle(false)
+	menu.SetShowStatusBar(false)
+	menu.SetShowHelp(false)
+	menu.SetFilteringEnabled(false)
+	menu.DisableQuitKeybindings()
+	return menu
 }
 
 var menuItems = []string{"Start proxy", "Configure proxy", "Select WSL distribution", "Connection diagnostics", "Exit"}

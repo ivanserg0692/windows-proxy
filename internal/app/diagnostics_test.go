@@ -35,31 +35,31 @@ func TestManualIPDiagnosticUsesWindowsTCP(t *testing.T) {
 		}
 	}()
 	_, port, _ := net.SplitHostPort(listener.Addr().String())
-	c := config.Default()
-	c.Distribution = "Ubuntu"
-	c.ManualTargetIP = "127.0.0.1"
-	c.TargetPort, _ = strconv.Atoi(port)
-	r := &runner{}
-	s := &Service{WSL: wsl.Client{Runner: r}}
-	report, err := s.Diagnose(context.Background(), c)
+	cfg := config.Default()
+	cfg.Distribution = "Ubuntu"
+	cfg.ManualTargetIP = "127.0.0.1"
+	cfg.TargetPort, _ = strconv.Atoi(port)
+	commandRunner := &runner{}
+	service := &Service{WSL: wsl.Client{Runner: commandRunner}}
+	report, err := service.Diagnose(context.Background(), cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if report.Selected != netip.MustParseAddr("127.0.0.1") || len(report.Probes) != 1 || report.Probes[0].Error != "" {
 		t.Fatalf("wrong report: %+v", report)
 	}
-	if len(r.calls) != 1 {
-		t.Fatalf("manual IP unexpectedly ran discovery: %v", r.calls)
+	if len(commandRunner.calls) != 1 {
+		t.Fatalf("manual IP unexpectedly ran discovery: %v", commandRunner.calls)
 	}
 }
 
 func TestRejectSelfProxy(t *testing.T) {
-	c := config.Default()
-	c.Distribution = "Ubuntu"
-	c.ManualTargetIP = "127.0.0.1"
-	c.TargetPort = c.ListenPort
-	s := &Service{WSL: wsl.Client{Runner: &runner{}}}
-	report, err := s.Diagnose(context.Background(), c)
+	cfg := config.Default()
+	cfg.Distribution = "Ubuntu"
+	cfg.ManualTargetIP = "127.0.0.1"
+	cfg.TargetPort = cfg.ListenPort
+	service := &Service{WSL: wsl.Client{Runner: &runner{}}}
+	report, err := service.Diagnose(context.Background(), cfg)
 	if err == nil || len(report.Probes) != 1 || report.Probes[0].Error == "" {
 		t.Fatalf("self proxy accepted: %+v %v", report, err)
 	}

@@ -12,8 +12,8 @@ import (
 var fieldLabels = []string{"Windows listen address", "Windows listen port", "WSL distribution (Enter to select)", "WSL target port", "Manual IPv4 (empty = auto)", "Connect timeout (ms)", "TCP retries", "Retry delay (ms)"}
 
 func (m *model) openForm() {
-	c := m.config
-	values := []string{c.ListenAddress, strconv.Itoa(c.ListenPort), c.Distribution, strconv.Itoa(c.TargetPort), c.ManualTargetIP, strconv.Itoa(c.ConnectTimeoutMS), strconv.Itoa(c.ConnectRetries), strconv.Itoa(c.RetryDelayMS)}
+	cfg := m.config
+	values := []string{cfg.ListenAddress, strconv.Itoa(cfg.ListenPort), cfg.Distribution, strconv.Itoa(cfg.TargetPort), cfg.ManualTargetIP, strconv.Itoa(cfg.ConnectTimeoutMS), strconv.Itoa(cfg.ConnectRetries), strconv.Itoa(cfg.RetryDelayMS)}
 	m.fields = make([]textinput.Model, len(values))
 	for i, value := range values {
 		input := textinput.New()
@@ -28,19 +28,19 @@ func (m *model) openForm() {
 }
 
 func (m *model) formConfig() (config.Config, error) {
-	c := m.config
-	c.ListenAddress = strings.TrimSpace(m.fields[0].Value())
-	c.Distribution = m.fields[2].Value()
-	c.ManualTargetIP = strings.TrimSpace(m.fields[4].Value())
+	cfg := m.config
+	cfg.ListenAddress = strings.TrimSpace(m.fields[0].Value())
+	cfg.Distribution = m.fields[2].Value()
+	cfg.ManualTargetIP = strings.TrimSpace(m.fields[4].Value())
 	for _, field := range []struct {
 		index  int
 		target *int
-	}{{1, &c.ListenPort}, {3, &c.TargetPort}, {5, &c.ConnectTimeoutMS}, {6, &c.ConnectRetries}, {7, &c.RetryDelayMS}} {
+	}{{1, &cfg.ListenPort}, {3, &cfg.TargetPort}, {5, &cfg.ConnectTimeoutMS}, {6, &cfg.ConnectRetries}, {7, &cfg.RetryDelayMS}} {
 		value, err := strconv.Atoi(strings.TrimSpace(m.fields[field.index].Value()))
 		if err != nil {
-			return c, fmt.Errorf("%s must be an integer", fieldLabels[field.index])
+			return cfg, fmt.Errorf("%s must be an integer", fieldLabels[field.index])
 		}
 		*field.target = value
 	}
-	return c, c.Validate()
+	return cfg, cfg.Validate()
 }

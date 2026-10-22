@@ -25,12 +25,12 @@ func (l *Logs) Lines() []string {
 	return append([]string(nil), l.lines...)
 }
 func (h *logHandler) Enabled(context.Context, slog.Level) bool { return true }
-func (h *logHandler) Handle(_ context.Context, r slog.Record) error {
-	line := r.Time.Format("15:04:05") + " " + r.Level.String() + " " + r.Message
+func (h *logHandler) Handle(_ context.Context, record slog.Record) error {
+	line := record.Time.Format("15:04:05") + " " + record.Level.String() + " " + record.Message
 	attrs := append([]slog.Attr(nil), h.attrs...)
-	r.Attrs(func(a slog.Attr) bool { attrs = append(attrs, a); return true })
-	for _, a := range attrs {
-		line += " " + h.group + a.Key + "=" + a.Value.String()
+	record.Attrs(func(attr slog.Attr) bool { attrs = append(attrs, attr); return true })
+	for _, attr := range attrs {
+		line += " " + h.group + attr.Key + "=" + attr.Value.String()
 	}
 	line = safe(line)
 	if len(line) > 1000 {

@@ -28,28 +28,28 @@ type Server struct {
 	cancel    context.CancelFunc
 }
 
-func Start(c config.Config, ip netip.Addr, resolve ResolveFunc, logger *slog.Logger) (*Server, error) {
-	if err := c.Validate(); err != nil {
+func Start(cfg config.Config, ip netip.Addr, resolve ResolveFunc, logger *slog.Logger) (*Server, error) {
+	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
-	if err := c.CheckTarget(ip); err != nil {
+	if err := cfg.CheckTarget(ip); err != nil {
 		return nil, err
 	}
-	listener, err := net.Listen("tcp4", c.ListenEndpoint())
+	listener, err := net.Listen("tcp4", cfg.ListenEndpoint())
 	if err != nil {
-		return nil, fmt.Errorf("listen on %s: %w", c.ListenEndpoint(), err)
+		return nil, fmt.Errorf("listen on %s: %w", cfg.ListenEndpoint(), err)
 	}
 	stats := &Stats{}
 	stats.setUpstream(ip)
-	dialer := &connectDialer{config: c, ip: ip, stats: stats, resolve: resolve, dial: (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext}
-	t := newTransport(dialer, c.TargetEndpoint(ip))
-	upstream := &url.URL{Scheme: "http", Host: c.TargetEndpoint(ip)}
+	dialer := &connectDialer{config: cfg, ip: ip, stats: stats, resolve: resolve, dial: (&net.Dialer{KeepAlive: 30 * time.Second}).DialContext}
+	proxyTransport := newTransport(dialer, cfg.TargetEndpoint(ip))
+	upstream := &url.URL{Scheme: "http", Host: cfg.TargetEndpoint(ip)}
 	proxy := &httputil.ReverseProxy{
-		Transport: t,
-		Rewrite: func(r *httputil.ProxyRequest) {
-			r.SetURL(upstream)
-			r.Out.Host = r.In.Host
-			r.SetXForwarded()
+		Transport: proxyTransport,
+		Rewrite: func(proxyRequest *httputil.ProxyRequest) {
+			proxyRequest.SetURL(upstream)
+			proxyRequest.Out.Host = proxyRequest.In.Host
+			proxyRequest.SetXForwarded()
 		},
 		ErrorLog: log.New(&logWriter{logger: logger}, "", 0),
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
@@ -59,8 +59,8 @@ func Start(c config.Config, ip netip.Addr, resolve ResolveFunc, logger *slog.Log
 		},
 	}
 	baseCtx, cancel := context.WithCancel(context.Background())
-	s := &Server{transport: t, listener: listener, stats: stats, done: make(chan struct{}), cancel: cancel}
-	s.http = &http.Server{
+	server := &Server{transport: proxyTransport, listener: listener, stats: stats, done: make(chan struct{}), cancel: cancel}
+	server.http = &http.Server{
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1024 * 1024,
 		BaseContext: func(net.Listener) context.Context { return baseCtx },
 		ErrorLog:    log.New(&logWriter{logger: logger}, "", 0),
@@ -87,16 +87,16 @@ func Start(c config.Config, ip netip.Addr, resolve ResolveFunc, logger *slog.Log
 		}),
 	}
 	go func() {
-		err := s.http.Serve(listener)
+		err := server.http.Serve(listener)
 		if errors.Is(err, http.ErrServerClosed) {
 			err = nil
 		}
-		s.mu.Lock()
-		s.err = err
-		s.mu.Unlock()
-		close(s.done)
+		server.mu.Lock()
+		server.err = err
+		server.mu.Unlock()
+		close(server.done)
 	}()
-	return s, nil
+	return server, nil
 }
 
 func (s *Server) Snapshot() Snapshot    { return s.stats.Snapshot() }
