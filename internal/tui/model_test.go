@@ -14,14 +14,14 @@ func TestFormReportsInvalidPortWithoutSaving(t *testing.T) {
 	logs := &Logs{}
 	uiModel := New(context.Background(), &app.Service{Store: config.Store{Path: filepath.Join(t.TempDir(), "config.json")}}, logs).(*model)
 	uiModel.config.Distribution = "Ubuntu"
-	uiModel.openForm()
-	uiModel.fields[1].SetValue("65536")
-	if _, err := uiModel.formConfig(); err == nil {
+	uiModel.form.open(uiModel.config)
+	uiModel.form.fields[1].SetValue("65536")
+	if _, err := uiModel.form.configuration(); err == nil {
 		t.Fatal("invalid port accepted")
 	}
-	uiModel.fields[1].SetValue("8080")
-	uiModel.fields[4].SetValue("172.28.1.4")
-	cfg, err := uiModel.formConfig()
+	uiModel.form.fields[1].SetValue("8080")
+	uiModel.form.fields[4].SetValue("172.28.1.4")
+	cfg, err := uiModel.form.configuration()
 	if err != nil {
 		t.Fatal(err)
 	}

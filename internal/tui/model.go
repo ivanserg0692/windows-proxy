@@ -7,21 +7,9 @@ import (
 	"os"
 	"time"
 
-	"charm.land/bubbles/v2/list"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"wslproxy/internal/app"
 	"wslproxy/internal/config"
-)
-
-type screen int
-
-const (
-	menuScreen screen = iota
-	formScreen
-	distributionsScreen
-	diagnosticsScreen
-	runningScreen
 )
 
 type model struct {
@@ -29,20 +17,18 @@ type model struct {
 	service       *app.Service
 	logs          *Logs
 	config        config.Config
-	menu          list.Model
-	distributions list.Model
-	names         []string
-	screen        screen
-	returnTo      screen
-	fields        []textinput.Model
-	focus         int
+	menu          *menuScreen
+	form          *formScreen
+	distributions *distributionsScreen
+	diagnostics   *diagnosticsScreen
+	runningView   *runningScreen
+	active        screenComponent
 	width, height int
 	busy          string
 	cancel        context.CancelFunc
 	operation     int
 	error         string
 	notice        string
-	report        app.Report
 	running       *app.Running
 }
 
@@ -62,7 +48,14 @@ type tickMsg struct{}
 
 func New(ctx context.Context, service *app.Service, logs *Logs) tea.Model {
 	cfg, err := service.Store.Load()
-	uiModel := &model{ctx: ctx, service: service, logs: logs, config: cfg, menu: choiceList(menuItems), distributions: choiceList(nil), width: 80, height: 30}
+	uiModel := &model{
+		ctx: ctx, service: service, logs: logs, config: cfg,
+		menu: newMenuScreen(), form: &formScreen{},
+		distributions: newDistributionsScreen(),
+		diagnostics:   &diagnosticsScreen{}, runningView: &runningScreen{},
+		width: 80, height: 30,
+	}
+	uiModel.active = uiModel.menu
 	if err != nil {
 		uiModel.config = config.Default()
 		if errors.Is(err, os.ErrNotExist) {
@@ -85,10 +78,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
-		m.menu.SetSize(max(20, min(64, msg.Width-8)), 7)
-		m.distributions.SetSize(max(20, min(64, msg.Width-8)), max(3, min(10, msg.Height-13)))
-		for i := range m.fields {
-			m.fields[i].SetWidth(max(12, min(46, msg.Width-12)))
+		for _, component := range []screenComponent{m.menu, m.form, m.distributions, m.diagnostics, m.runningView} {
+			component.resize(msg.Width, msg.Height)
 		}
 		return m, nil
 	case distributionsMsg:
@@ -96,9 +87,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.error = msg.err.Error()
 			return m, nil
 		}
-		m.names = msg.names
-		m.distributions = choiceList(msg.names)
-		m.distributions.SetSize(max(20, min(64, m.width-8)), max(3, min(10, m.height-13)))
+		m.distributions.setNames(msg.names, m.width, m.height)
 		if len(msg.names) == 0 {
 			m.error = "No WSL distributions found. Install a distribution and refresh with R."
 		}
@@ -112,10 +101,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.cancel()
 			m.cancel = nil
 		}
-		m.report = msg.report
+		m.diagnostics.setReport(msg.report)
 		if msg.stopped {
 			m.running = nil
-			m.screen = menuScreen
+			m.active = m.menu
 		}
 		if msg.err != nil {
 			m.error = msg.err.Error()
@@ -124,12 +113,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.saved != nil {
 			m.config = *msg.saved
 			m.notice = "Configuration saved. Changes apply on the next start."
-			m.screen = menuScreen
+			m.active = m.menu
 		}
 		if msg.running != nil {
 			m.running = msg.running
 			m.config = msg.running.Config
-			m.screen = runningScreen
+			m.active = m.runningView
 			m.notice = ""
 		}
 		if msg.stopped {
@@ -160,109 +149,75 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if key == "esc" {
-			m.screen = menuScreen
+			m.active = m.menu
 			m.error = ""
 			return m, nil
 		}
-		switch m.screen {
-		case menuScreen:
-			if key == "enter" {
-				m.error = ""
-				m.notice = ""
-				switch m.menu.Index() {
-				case 0:
-					if m.running != nil {
-						m.screen = runningScreen
-						return m, nil
-					}
-					return m, m.start()
-				case 1:
-					m.openForm()
-					return m, m.fields[0].Focus()
-				case 2:
-					m.returnTo = menuScreen
-					m.screen = distributionsScreen
-					return m, m.loadDistributions()
-				case 3:
-					m.screen = diagnosticsScreen
-					return m, m.diagnose()
-				case 4:
-					return m, tea.Quit
-				}
-			}
-			var cmd tea.Cmd
-			m.menu, cmd = m.menu.Update(msg)
-			return m, cmd
-		case formScreen:
-			return m, m.updateForm(msg)
-		case distributionsScreen:
-			if key == "r" {
-				m.error = ""
-				return m, m.loadDistributions()
-			}
-			if key == "enter" {
-				selected, ok := m.distributions.SelectedItem().(item)
-				if !ok {
-					return m, nil
-				}
-				if m.returnTo == formScreen {
-					m.fields[2].SetValue(string(selected))
-					m.screen = formScreen
-					return m, m.fields[m.focus].Focus()
-				}
-				cfg := m.config
-				cfg.Distribution = string(selected)
-				return m, m.save(cfg)
-			}
-			var cmd tea.Cmd
-			m.distributions, cmd = m.distributions.Update(msg)
-			return m, cmd
-		case diagnosticsScreen:
-			if key == "r" {
-				return m, m.diagnose()
-			}
-		case runningScreen:
-			if key == "s" || key == "S" {
-				return m, m.stop()
-			}
-		}
 	}
-	if m.screen == formScreen && m.busy == "" && len(m.fields) > 0 {
-		var cmd tea.Cmd
-		m.fields[m.focus], cmd = m.fields[m.focus].Update(msg)
+	if m.busy != "" {
+		return m, nil
+	}
+	cmd, intent := m.active.update(msg)
+	intentCmd := m.handleIntent(intent)
+	if cmd == nil {
+		return m, intentCmd
+	}
+	if intentCmd == nil {
 		return m, cmd
 	}
-	return m, nil
+	return m, tea.Batch(cmd, intentCmd)
 }
 
-func (m *model) updateForm(msg tea.KeyPressMsg) tea.Cmd {
-	switch msg.String() {
-	case "ctrl+s":
-		cfg, err := m.formConfig()
-		if err != nil {
-			m.error = err.Error()
+// handleIntent coordinates navigation and application operations. Screens never
+// receive the root model or invoke services themselves.
+func (m *model) handleIntent(intent screenIntent) tea.Cmd {
+	switch intent := intent.(type) {
+	case startProxyIntent:
+		m.error, m.notice = "", ""
+		if m.running != nil {
+			m.active = m.runningView
 			return nil
 		}
-		return m.save(cfg)
-	case "enter":
-		if m.focus == 2 {
-			m.returnTo = formScreen
-			m.screen = distributionsScreen
-			return m.loadDistributions()
+		return m.start()
+	case openFormIntent:
+		m.error, m.notice = "", ""
+		m.active = m.form
+		return m.form.open(m.config)
+	case chooseDistributionIntent:
+		if !intent.forForm {
+			m.error, m.notice = "", ""
 		}
-		fallthrough
-	case "tab", "down":
-		m.fields[m.focus].Blur()
-		m.focus = (m.focus + 1) % len(m.fields)
-		return m.fields[m.focus].Focus()
-	case "shift+tab", "up":
-		m.fields[m.focus].Blur()
-		m.focus = (m.focus + len(m.fields) - 1) % len(m.fields)
-		return m.fields[m.focus].Focus()
+		m.distributions.open(intent.forForm)
+		m.active = m.distributions
+		return m.loadDistributions()
+	case diagnoseIntent:
+		if m.active == m.menu {
+			m.error, m.notice = "", ""
+		}
+		m.active = m.diagnostics
+		return m.diagnose()
+	case quitIntent:
+		m.error, m.notice = "", ""
+		return tea.Quit
+	case refreshDistributionsIntent:
+		m.error = ""
+		return m.loadDistributions()
+	case distributionSelectedIntent:
+		if intent.forForm {
+			m.active = m.form
+			return m.form.selectDistribution(intent.name)
+		}
+		cfg := m.config
+		cfg.Distribution = intent.name
+		return m.save(cfg)
+	case saveConfigIntent:
+		return m.save(intent.config)
+	case showErrorIntent:
+		m.error = intent.err.Error()
+	case stopProxyIntent:
+		return m.stop()
 	}
-	var cmd tea.Cmd
-	m.fields[m.focus], cmd = m.fields[m.focus].Update(msg)
-	return cmd
+	return nil
 }
 
 func (m *model) operationContext(label string) (context.Context, int) {
