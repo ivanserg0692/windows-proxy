@@ -1,4 +1,4 @@
-package tui
+package screens
 
 import (
 	"charm.land/bubbles/v2/list"
@@ -29,27 +29,27 @@ func choiceList(names []string) list.Model {
 
 var menuItems = []string{"Start proxy", "Configure proxy", "Select WSL distribution", "Connection diagnostics", "Exit"}
 
-// menuScreen owns selection; the root decides how to perform each action.
-type menuScreen struct{ choices list.Model }
+// Menu owns selection; the root decides how to perform each action.
+type Menu struct{ choices list.Model }
 
-func newMenuScreen() *menuScreen {
-	return &menuScreen{choices: choiceList(menuItems)}
+func NewMenu() *Menu {
+	return &Menu{choices: choiceList(menuItems)}
 }
 
-func (menu *menuScreen) update(msg tea.Msg) (tea.Cmd, screenIntent) {
+func (menu *Menu) Update(msg tea.Msg) (tea.Cmd, Intent) {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		if key.String() == "enter" {
 			switch menu.choices.Index() {
 			case 0:
-				return nil, startProxyIntent{}
+				return nil, StartProxyIntent{}
 			case 1:
-				return nil, openFormIntent{}
+				return nil, OpenFormIntent{}
 			case 2:
-				return nil, chooseDistributionIntent{}
+				return nil, ChooseDistributionIntent{}
 			case 3:
-				return nil, diagnoseIntent{}
+				return nil, DiagnoseIntent{}
 			case 4:
-				return nil, quitIntent{}
+				return nil, QuitIntent{}
 			}
 		}
 		var cmd tea.Cmd
@@ -59,14 +59,14 @@ func (menu *menuScreen) update(msg tea.Msg) (tea.Cmd, screenIntent) {
 	return nil, nil
 }
 
-func (menu *menuScreen) resize(width, height int) {
+func (menu *Menu) Resize(width, height int) {
 	menu.choices.SetSize(max(20, min(64, width-8)), 7)
 }
 
-func (menu *menuScreen) view(snapshot screenSnapshot) screenContent {
+func (menu *Menu) View(snapshot Snapshot) Content {
 	body := menu.choices.View()
-	if snapshot.proxyActive {
+	if snapshot.ProxyActive {
 		body += "\n" + muted.Render("Proxy remains active. Start proxy opens its status.")
 	}
-	return screenContent{body: body, help: "Up/Down: select   Enter: open   Ctrl+C: exit"}
+	return Content{Body: body, Help: "Up/Down: select   Enter: open   Ctrl+C: exit"}
 }

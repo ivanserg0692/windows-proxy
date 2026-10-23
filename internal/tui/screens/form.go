@@ -1,4 +1,4 @@
-package tui
+package screens
 
 import (
 	"fmt"
@@ -12,13 +12,13 @@ import (
 
 var fieldLabels = []string{"Windows listen address", "Windows listen port", "WSL distribution (Enter to select)", "WSL target port", "Manual IPv4 (empty = auto)", "Connect timeout (ms)", "TCP retries", "Retry delay (ms)"}
 
-type formScreen struct {
+type Form struct {
 	base   config.Config
 	fields []textinput.Model
 	focus  int
 }
 
-func (form *formScreen) open(cfg config.Config) tea.Cmd {
+func (form *Form) Open(cfg config.Config) tea.Cmd {
 	form.base = cfg
 	values := []string{cfg.ListenAddress, strconv.Itoa(cfg.ListenPort), cfg.Distribution, strconv.Itoa(cfg.TargetPort), cfg.ManualTargetIP, strconv.Itoa(cfg.ConnectTimeoutMS), strconv.Itoa(cfg.ConnectRetries), strconv.Itoa(cfg.RetryDelayMS)}
 	form.fields = make([]textinput.Model, len(values))
@@ -34,7 +34,7 @@ func (form *formScreen) open(cfg config.Config) tea.Cmd {
 	return form.fields[0].Focus()
 }
 
-func (form *formScreen) configuration() (config.Config, error) {
+func (form *Form) configuration() (config.Config, error) {
 	cfg := form.base
 	cfg.ListenAddress = strings.TrimSpace(form.fields[0].Value())
 	cfg.Distribution = form.fields[2].Value()
@@ -52,18 +52,18 @@ func (form *formScreen) configuration() (config.Config, error) {
 	return cfg, cfg.Validate()
 }
 
-func (form *formScreen) selectDistribution(name string) tea.Cmd {
+func (form *Form) SelectDistribution(name string) tea.Cmd {
 	form.fields[2].SetValue(name)
 	return form.fields[form.focus].Focus()
 }
 
-func (form *formScreen) resize(width, height int) {
+func (form *Form) Resize(width, height int) {
 	for index := range form.fields {
 		form.fields[index].SetWidth(max(12, min(46, width-12)))
 	}
 }
 
-func (form *formScreen) update(msg tea.Msg) (tea.Cmd, screenIntent) {
+func (form *Form) Update(msg tea.Msg) (tea.Cmd, Intent) {
 	if len(form.fields) == 0 {
 		return nil, nil
 	}
@@ -72,12 +72,12 @@ func (form *formScreen) update(msg tea.Msg) (tea.Cmd, screenIntent) {
 		case "ctrl+s":
 			cfg, err := form.configuration()
 			if err != nil {
-				return nil, showErrorIntent{err: err}
+				return nil, ShowErrorIntent{Err: err}
 			}
-			return nil, saveConfigIntent{config: cfg}
+			return nil, SaveConfigIntent{Config: cfg}
 		case "enter":
 			if form.focus == 2 {
-				return nil, chooseDistributionIntent{forForm: true}
+				return nil, ChooseDistributionIntent{ForForm: true}
 			}
 			fallthrough
 		case "tab", "down":
@@ -95,7 +95,7 @@ func (form *formScreen) update(msg tea.Msg) (tea.Cmd, screenIntent) {
 	return cmd, nil
 }
 
-func (form *formScreen) view(screenSnapshot) screenContent {
+func (form *Form) View(Snapshot) Content {
 	body := ""
 	start := max(0, form.focus-2)
 	end := min(len(form.fields), start+4)
@@ -109,5 +109,5 @@ func (form *formScreen) view(screenSnapshot) screenContent {
 		body += label + "\n" + form.fields[index].View() + "\n"
 	}
 	body += muted.Render(fmt.Sprintf("Field %d/%d", form.focus+1, len(form.fields)))
-	return screenContent{body: body, help: "Tab/Up/Down: field   Ctrl+S: save   Esc: discard"}
+	return Content{Body: body, Help: "Tab/Up/Down: field   Ctrl+S: save   Esc: discard"}
 }

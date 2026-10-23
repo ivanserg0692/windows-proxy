@@ -1,4 +1,4 @@
-package tui
+package screens
 
 import (
 	"fmt"
@@ -7,23 +7,23 @@ import (
 	"wslproxy/internal/app"
 )
 
-type diagnosticsScreen struct{ report app.Report }
+type Diagnostics struct{ report app.Report }
 
-func (diagnostics *diagnosticsScreen) setReport(report app.Report) {
+func (diagnostics *Diagnostics) SetReport(report app.Report) {
 	diagnostics.report = report
 }
 
-func (diagnostics *diagnosticsScreen) resize(width, height int) {}
+func (diagnostics *Diagnostics) Resize(width, height int) {}
 
-func (diagnostics *diagnosticsScreen) update(msg tea.Msg) (tea.Cmd, screenIntent) {
+func (diagnostics *Diagnostics) Update(msg tea.Msg) (tea.Cmd, Intent) {
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "r" {
-		return nil, diagnoseIntent{}
+		return nil, DiagnoseIntent{}
 	}
 	return nil, nil
 }
 
-func (diagnostics *diagnosticsScreen) view(snapshot screenSnapshot) screenContent {
-	cfg := snapshot.config
+func (diagnostics *Diagnostics) View(snapshot Snapshot) Content {
+	cfg := snapshot.Config
 	body := fmt.Sprintf("Windows: %s\nWSL: %s, port %d\n\n", cfg.ListenEndpoint(), safe(cfg.Distribution), cfg.TargetPort)
 	for index, probe := range diagnostics.report.Probes {
 		if index >= 4 {
@@ -39,5 +39,5 @@ func (diagnostics *diagnosticsScreen) view(snapshot screenSnapshot) screenConten
 	if diagnostics.report.Selected.IsValid() {
 		body += "\nSelected: " + diagnostics.report.Selected.String()
 	}
-	return screenContent{body: body, help: "R: run diagnostics   Esc: menu"}
+	return Content{Body: body, Help: "R: run diagnostics   Esc: menu"}
 }
