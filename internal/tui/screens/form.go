@@ -13,9 +13,14 @@ import (
 var fieldLabels = []string{"Windows listen address", "Windows listen port", "WSL distribution (Enter to select)", "WSL target port", "Manual IPv4 (empty = auto)", "Connect timeout (ms)", "TCP retries", "Retry delay (ms)"}
 
 type Form struct {
-	base   config.Config
-	fields []textinput.Model
-	focus  int
+	receiver FormReceiver
+	base     config.Config
+	fields   []textinput.Model
+	focus    int
+}
+
+func NewForm(receiver FormReceiver) *Form {
+	return &Form{receiver: receiver}
 }
 
 func (form *Form) Open(cfg config.Config) tea.Cmd {
@@ -63,36 +68,36 @@ func (form *Form) Resize(width, height int) {
 	}
 }
 
-func (form *Form) Update(msg tea.Msg) (tea.Cmd, Intent) {
+func (form *Form) Update(msg tea.Msg) tea.Cmd {
 	if len(form.fields) == 0 {
-		return nil, nil
+		return nil
 	}
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		switch key.String() {
 		case "ctrl+s":
 			cfg, err := form.configuration()
 			if err != nil {
-				return nil, ShowErrorIntent{Err: err}
+				return form.receiver.ShowError(err)
 			}
-			return nil, SaveConfigIntent{Config: cfg}
+			return form.receiver.SaveConfig(cfg)
 		case "enter":
 			if form.focus == 2 {
-				return nil, ChooseDistributionIntent{ForForm: true}
+				return form.receiver.ChooseDistribution(true)
 			}
 			fallthrough
 		case "tab", "down":
 			form.fields[form.focus].Blur()
 			form.focus = (form.focus + 1) % len(form.fields)
-			return form.fields[form.focus].Focus(), nil
+			return form.fields[form.focus].Focus()
 		case "shift+tab", "up":
 			form.fields[form.focus].Blur()
 			form.focus = (form.focus + len(form.fields) - 1) % len(form.fields)
-			return form.fields[form.focus].Focus(), nil
+			return form.fields[form.focus].Focus()
 		}
 	}
 	var cmd tea.Cmd
 	form.fields[form.focus], cmd = form.fields[form.focus].Update(msg)
-	return cmd, nil
+	return cmd
 }
 
 func (form *Form) View(Snapshot) Content {

@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 	"wslproxy/internal/app"
 	"wslproxy/internal/config"
+	"wslproxy/internal/tui/screens"
+	"wslproxy/internal/wsl"
 )
 
 func newTestModel(t *testing.T) *model {
@@ -33,28 +36,36 @@ func press(uiModel *model, code rune, modifiers ...tea.KeyMod) tea.Cmd {
 
 func TestDistributionSelectionPreservesFormDraftAndFocus(t *testing.T) {
 	uiModel := newTestModel(t)
-	uiModel.menu.choices.Select(1)
+	press(uiModel, tea.KeyDown)
 	press(uiModel, tea.KeyEnter)
-	uiModel.form.fields[0].SetValue("127.0.0.2")
+	replaceFocusedInput(uiModel, "127.0.0.2")
 	press(uiModel, tea.KeyTab)
 	press(uiModel, tea.KeyTab)
 	press(uiModel, tea.KeyEnter)
 	uiModel.Update(distributionsMsg{names: []string{"Ubuntu", "Debian"}})
 	press(uiModel, tea.KeyDown)
 	press(uiModel, tea.KeyEnter)
-	if uiModel.active != uiModel.form || uiModel.form.focus != 2 || !uiModel.form.fields[2].Focused() {
+	if uiModel.active != uiModel.form || !strings.Contains(uiModel.form.View(screens.Snapshot{}).Body, "Field 3/8") {
 		t.Fatal("selection did not return to the focused distribution field")
 	}
-	if uiModel.form.fields[0].Value() != "127.0.0.2" || uiModel.form.fields[2].Value() != "Debian" {
+	uiModel.service.WSL = wsl.Client{Runner: operationRunner(func(context.Context, ...string) ([]byte, error) {
+		return []byte("Ubuntu\nDebian"), nil
+	})}
+	cmd := press(uiModel, 's', tea.ModCtrl)
+	if cmd == nil || uiModel.busy == "" {
+		t.Fatal("save did not start synchronously")
+	}
+	saved, ok := cmd().(configSavedMsg)
+	if !ok || saved.err != nil || saved.config.ListenAddress != "127.0.0.2" || saved.config.Distribution != "Debian" {
 		t.Fatal("selection lost the form draft")
 	}
 }
 
 func TestEscapeFromSelectorDiscardsFormOnReopen(t *testing.T) {
 	uiModel := newTestModel(t)
-	uiModel.menu.choices.Select(1)
+	press(uiModel, tea.KeyDown)
 	press(uiModel, tea.KeyEnter)
-	uiModel.form.fields[0].SetValue("draft")
+	replaceFocusedInput(uiModel, "draft")
 	press(uiModel, tea.KeyTab)
 	press(uiModel, tea.KeyTab)
 	press(uiModel, tea.KeyEnter)
@@ -63,14 +74,16 @@ func TestEscapeFromSelectorDiscardsFormOnReopen(t *testing.T) {
 		t.Fatal("Escape from selector did not return to menu")
 	}
 	press(uiModel, tea.KeyEnter)
-	if uiModel.form.fields[0].Value() != uiModel.config.ListenAddress || uiModel.form.focus != 0 {
+	if body := uiModel.form.View(screens.Snapshot{}).Body; strings.Contains(body, "draft") || !strings.Contains(body, uiModel.config.ListenAddress) || !strings.Contains(body, "Field 1/8") {
 		t.Fatal("reopened form retained a discarded draft")
 	}
 }
 
 func TestBusyOperationBlocksInputButAllowsResizeAndCancel(t *testing.T) {
 	uiModel := newTestModel(t)
-	uiModel.menu.choices.Select(3)
+	press(uiModel, tea.KeyDown)
+	press(uiModel, tea.KeyDown)
+	press(uiModel, tea.KeyDown)
 	if press(uiModel, tea.KeyEnter) == nil || uiModel.busy == "" || uiModel.active != uiModel.diagnostics {
 		t.Fatal("diagnostics did not start synchronously")
 	}
@@ -98,12 +111,12 @@ func TestOperationResultsPreserveOrderingAndIgnoreStaleResults(t *testing.T) {
 	uiModel.operation = 2
 	uiModel.busy = "stopping"
 	uiModel.running = &app.Running{}
-	uiModel.active = uiModel.runningView
-	uiModel.Update(operationMsg{id: 1, stopped: true})
+	uiModel.setActive(uiModel.runningView)
+	uiModel.Update(proxyStoppedMsg{id: 1})
 	if uiModel.busy == "" || uiModel.running == nil || uiModel.active != uiModel.runningView {
 		t.Fatal("stale result changed current operation")
 	}
-	uiModel.Update(operationMsg{id: 2, stopped: true, err: errors.New("stop failed")})
+	uiModel.Update(proxyStoppedMsg{id: 2, err: errors.New("stop failed")})
 	if uiModel.busy != "" || uiModel.running != nil || uiModel.active != uiModel.menu || uiModel.error != "stop failed" {
 		t.Fatal("stop result did not release UI state before reporting its error")
 	}
@@ -112,12 +125,24 @@ func TestOperationResultsPreserveOrderingAndIgnoreStaleResults(t *testing.T) {
 func TestDistributionResultsArriveWhileAnotherScreenIsActive(t *testing.T) {
 	uiModel := newTestModel(t)
 	uiModel.Update(distributionsMsg{names: []string{"Ubuntu", "Debian"}})
-	uiModel.menu.choices.Select(2)
+	press(uiModel, tea.KeyDown)
+	press(uiModel, tea.KeyDown)
 	press(uiModel, tea.KeyEnter)
-	if len(uiModel.distributions.choices.Items()) != 2 {
+	if body := uiModel.distributions.View(screens.Snapshot{}).Body; !strings.Contains(body, "Ubuntu") || !strings.Contains(body, "Debian") {
 		t.Fatal("background distribution result was lost")
 	}
 	if cmd := press(uiModel, tea.KeyEnter); cmd == nil || uiModel.busy == "" {
 		t.Fatal("menu selection did not begin saving synchronously")
+	}
+}
+
+// replaceFocusedInput edits through the same key events as the interactive UI.
+func replaceFocusedInput(uiModel *model, value string) {
+	press(uiModel, tea.KeyEnd)
+	for i := 0; i < 256; i++ {
+		press(uiModel, tea.KeyBackspace)
+	}
+	for _, r := range value {
+		uiModel.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
 }

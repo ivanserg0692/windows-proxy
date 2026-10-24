@@ -7,7 +7,14 @@ import (
 	"wslproxy/internal/app"
 )
 
-type Diagnostics struct{ report app.Report }
+type Diagnostics struct {
+	report   app.Report
+	receiver DiagnosticsReceiver
+}
+
+func NewDiagnostics(receiver DiagnosticsReceiver) *Diagnostics {
+	return &Diagnostics{receiver: receiver}
+}
 
 func (diagnostics *Diagnostics) SetReport(report app.Report) {
 	diagnostics.report = report
@@ -15,11 +22,11 @@ func (diagnostics *Diagnostics) SetReport(report app.Report) {
 
 func (diagnostics *Diagnostics) Resize(width, height int) {}
 
-func (diagnostics *Diagnostics) Update(msg tea.Msg) (tea.Cmd, Intent) {
+func (diagnostics *Diagnostics) Update(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok && key.String() == "r" {
-		return nil, DiagnoseIntent{}
+		return diagnostics.receiver.Diagnose()
 	}
-	return nil, nil
+	return nil
 }
 
 func (diagnostics *Diagnostics) View(snapshot Snapshot) Content {

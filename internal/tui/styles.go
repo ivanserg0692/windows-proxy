@@ -3,6 +3,7 @@ package tui
 import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"wslproxy/internal/tui/screens"
 )
 
 var accent = lipgloss.NewStyle().Foreground(lipgloss.Color("#67D9CF")).Bold(true)
@@ -21,17 +22,17 @@ func (m *model) View() tea.View {
 		status = "RUNNING"
 	}
 	content := accent.Render("WSL PROXY") + "                         " + accent.Render(status) + "\n" + muted.Render("Windows -> WSL2 HTTP Reverse Proxy") + "\n\n"
-	snapshot := screenSnapshot{config: m.config, proxyActive: m.running != nil}
+	snapshot := screens.Snapshot{Config: m.config, ProxyActive: m.running != nil}
 	if m.active == m.runningView {
 		if m.running != nil {
-			snapshot.running = &runningSnapshot{config: m.running.Config, stats: m.running.Server.Snapshot()}
+			snapshot.Running = &screens.RunningSnapshot{Config: m.running.Config, Stats: m.running.Server.Snapshot()}
 		}
 		if m.height >= 32 {
-			snapshot.recentEvents = m.logs.Lines()
+			snapshot.RecentEvents = m.logs.Lines()
 		}
 	}
-	screen := m.active.view(snapshot)
-	body, help := screen.body, screen.help
+	screen := m.active.View(snapshot)
+	body, help := screen.Body, screen.Help
 	if m.busy != "" {
 		body += "\n\n" + accent.Render(m.busy)
 		help = "Ctrl+C: cancel and exit"
@@ -42,7 +43,7 @@ func (m *model) View() tea.View {
 	if m.notice != "" {
 		body += "\n\n" + muted.Render(safe(m.notice))
 	}
-	body += screen.footer
+	body += screen.Footer
 	content += body + "\n\n" + muted.Render(help)
 	frame := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("#4C617A")).Padding(1, 2).Width(width - 2).MaxWidth(width).MaxHeight(m.height - 1).Render(content)
 	view := tea.NewView(frame)

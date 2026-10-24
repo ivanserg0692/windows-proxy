@@ -8,15 +8,19 @@ import (
 )
 
 // The live server remains owned by the root. This screen only renders snapshots.
-type Running struct{}
+type Running struct{ receiver RunningReceiver }
+
+func NewRunning(receiver RunningReceiver) *Running {
+	return &Running{receiver: receiver}
+}
 
 func (running *Running) Resize(width, height int) {}
 
-func (running *Running) Update(msg tea.Msg) (tea.Cmd, Intent) {
+func (running *Running) Update(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok && (key.String() == "s" || key.String() == "S") {
-		return nil, StopProxyIntent{}
+		return running.receiver.StopProxy()
 	}
-	return nil, nil
+	return nil
 }
 
 func (running *Running) View(snapshot Snapshot) Content {

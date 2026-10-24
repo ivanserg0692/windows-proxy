@@ -30,33 +30,36 @@ func choiceList(names []string) list.Model {
 var menuItems = []string{"Start proxy", "Configure proxy", "Select WSL distribution", "Connection diagnostics", "Exit"}
 
 // Menu owns selection; the root decides how to perform each action.
-type Menu struct{ choices list.Model }
-
-func NewMenu() *Menu {
-	return &Menu{choices: choiceList(menuItems)}
+type Menu struct {
+	choices  list.Model
+	receiver MenuReceiver
 }
 
-func (menu *Menu) Update(msg tea.Msg) (tea.Cmd, Intent) {
+func NewMenu(receiver MenuReceiver) *Menu {
+	return &Menu{choices: choiceList(menuItems), receiver: receiver}
+}
+
+func (menu *Menu) Update(msg tea.Msg) tea.Cmd {
 	if key, ok := msg.(tea.KeyPressMsg); ok {
 		if key.String() == "enter" {
 			switch menu.choices.Index() {
 			case 0:
-				return nil, StartProxyIntent{}
+				return menu.receiver.StartProxy()
 			case 1:
-				return nil, OpenFormIntent{}
+				return menu.receiver.OpenForm()
 			case 2:
-				return nil, ChooseDistributionIntent{}
+				return menu.receiver.ChooseDistribution(false)
 			case 3:
-				return nil, DiagnoseIntent{}
+				return menu.receiver.Diagnose()
 			case 4:
-				return nil, QuitIntent{}
+				return menu.receiver.Quit()
 			}
 		}
 		var cmd tea.Cmd
 		menu.choices, cmd = menu.choices.Update(msg)
-		return cmd, nil
+		return cmd
 	}
-	return nil, nil
+	return nil
 }
 
 func (menu *Menu) Resize(width, height int) {

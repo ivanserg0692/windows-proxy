@@ -6,12 +6,13 @@ import (
 )
 
 type Distributions struct {
-	choices list.Model
-	forForm bool
+	receiver DistributionsReceiver
+	choices  list.Model
+	forForm  bool
 }
 
-func NewDistributions() *Distributions {
-	return &Distributions{choices: choiceList(nil)}
+func NewDistributions(receiver DistributionsReceiver) *Distributions {
+	return &Distributions{choices: choiceList(nil), receiver: receiver}
 }
 
 func (distributions *Distributions) Open(forForm bool) {
@@ -27,24 +28,24 @@ func (distributions *Distributions) Resize(width, height int) {
 	distributions.choices.SetSize(max(20, min(64, width-8)), max(3, min(10, height-13)))
 }
 
-func (distributions *Distributions) Update(msg tea.Msg) (tea.Cmd, Intent) {
+func (distributions *Distributions) Update(msg tea.Msg) tea.Cmd {
 	key, ok := msg.(tea.KeyPressMsg)
 	if !ok {
-		return nil, nil
+		return nil
 	}
 	switch key.String() {
 	case "r":
-		return nil, RefreshDistributionsIntent{}
+		return distributions.receiver.RefreshDistributions()
 	case "enter":
 		selected, ok := distributions.choices.SelectedItem().(item)
 		if !ok {
-			return nil, nil
+			return nil
 		}
-		return nil, DistributionSelectedIntent{Name: string(selected), ForForm: distributions.forForm}
+		return distributions.receiver.SelectDistribution(string(selected), distributions.forForm)
 	}
 	var cmd tea.Cmd
 	distributions.choices, cmd = distributions.choices.Update(msg)
-	return cmd, nil
+	return cmd
 }
 
 func (distributions *Distributions) View(Snapshot) Content {

@@ -7,9 +7,11 @@ import (
 	"os"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"wslproxy/internal/app"
 	"wslproxy/internal/config"
+	"wslproxy/internal/tui/screens"
+
+	tea "charm.land/bubbletea/v2"
 )
 
 type model struct {
@@ -17,11 +19,11 @@ type model struct {
 	service       *app.Service
 	logs          *Logs
 	config        config.Config
-	menu          *menuScreen
-	form          *formScreen
-	distributions *distributionsScreen
-	diagnostics   *diagnosticsScreen
-	runningView   *runningScreen
+	menu          *screens.Menu
+	form          *screens.Form
+	distributions *screens.Distributions
+	diagnostics   *screens.Diagnostics
+	runningView   *screens.Running
 	active        screenComponent
 	width, height int
 	busy          string
@@ -36,26 +38,20 @@ type distributionsMsg struct {
 	names []string
 	err   error
 }
-type operationMsg struct {
-	id      int
-	running *app.Running
-	report  app.Report
-	saved   *config.Config
-	stopped bool
-	err     error
-}
 type tickMsg struct{}
 
 func New(ctx context.Context, service *app.Service, logs *Logs) tea.Model {
 	cfg, err := service.Store.Load()
 	uiModel := &model{
 		ctx: ctx, service: service, logs: logs, config: cfg,
-		menu: newMenuScreen(), form: &formScreen{},
-		distributions: newDistributionsScreen(),
-		diagnostics:   &diagnosticsScreen{}, runningView: &runningScreen{},
 		width: 80, height: 30,
 	}
-	uiModel.active = uiModel.menu
+	uiModel.menu = screens.NewMenu(uiModel)
+	uiModel.form = screens.NewForm(uiModel)
+	uiModel.distributions = screens.NewDistributions(uiModel)
+	uiModel.diagnostics = screens.NewDiagnostics(uiModel)
+	uiModel.runningView = screens.NewRunning(uiModel)
+	uiModel.setActive(uiModel.menu)
 	if err != nil {
 		uiModel.config = config.Default()
 		if errors.Is(err, os.ErrNotExist) {
@@ -68,6 +64,10 @@ func New(ctx context.Context, service *app.Service, logs *Logs) tea.Model {
 	return uiModel
 }
 
+func (m *model) setActive(screen screenComponent) {
+	m.active = screen
+}
+
 func (m *model) Init() tea.Cmd { return tea.Batch(m.loadDistributions(), tick()) }
 func tick() tea.Cmd            { return tea.Tick(time.Second, func(time.Time) tea.Msg { return tickMsg{} }) }
 func (m *model) loadDistributions() tea.Cmd {
@@ -77,197 +77,140 @@ func (m *model) loadDistributions() tea.Cmd {
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width, m.height = msg.Width, msg.Height
-		for _, component := range []screenComponent{m.menu, m.form, m.distributions, m.diagnostics, m.runningView} {
-			component.resize(msg.Width, msg.Height)
-		}
+		m.handleResize(msg)
 		return m, nil
 	case distributionsMsg:
-		if msg.err != nil {
-			m.error = msg.err.Error()
-			return m, nil
-		}
-		m.distributions.setNames(msg.names, m.width, m.height)
-		if len(msg.names) == 0 {
-			m.error = "No WSL distributions found. Install a distribution and refresh with R."
-		}
+		m.handleDistributionsLoaded(msg)
 		return m, nil
-	case operationMsg:
-		if msg.id != m.operation {
-			return m, nil
-		}
-		m.busy = ""
-		if m.cancel != nil {
-			m.cancel()
-			m.cancel = nil
-		}
-		m.diagnostics.setReport(msg.report)
-		if msg.stopped {
-			m.running = nil
-			m.active = m.menu
-		}
-		if msg.err != nil {
-			m.error = msg.err.Error()
-			return m, nil
-		}
-		if msg.saved != nil {
-			m.config = *msg.saved
-			m.notice = "Configuration saved. Changes apply on the next start."
-			m.active = m.menu
-		}
-		if msg.running != nil {
-			m.running = msg.running
-			m.config = msg.running.Config
-			m.active = m.runningView
-			m.notice = ""
-		}
-		if msg.stopped {
-			m.notice = "Proxy stopped; Windows port released."
-		}
+	case configSavedMsg:
+		m.handleConfigSaved(msg)
+		return m, nil
+	case proxyStartedMsg:
+		m.handleProxyStarted(msg)
+		return m, nil
+	case proxyStoppedMsg:
+		m.handleProxyStopped(msg)
+		return m, nil
+	case diagnosticsCompletedMsg:
+		m.handleDiagnosticsCompleted(msg)
 		return m, nil
 	case tickMsg:
-		if m.running != nil && m.busy == "" {
-			select {
-			case <-m.running.Server.Done():
-				message := fmt.Sprintf("HTTP server stopped: %v", m.running.Server.Err())
-				cmd := m.stop()
-				m.error = message
-				return m, tea.Batch(cmd, tick())
-			default:
-			}
-		}
-		return m, tick()
+		return m, m.handleTick()
 	case tea.KeyPressMsg:
-		key := msg.String()
-		if key == "ctrl+c" {
-			if m.cancel != nil {
-				m.cancel()
-			}
-			return m, tea.Quit
-		}
-		if m.busy != "" {
-			return m, nil
-		}
-		if key == "esc" {
-			m.active = m.menu
-			m.error = ""
-			return m, nil
+		if cmd, handled := m.handleGlobalKey(msg); handled {
+			return m, cmd
 		}
 	}
 	if m.busy != "" {
 		return m, nil
 	}
-	cmd, intent := m.active.update(msg)
-	intentCmd := m.handleIntent(intent)
-	if cmd == nil {
-		return m, intentCmd
-	}
-	if intentCmd == nil {
-		return m, cmd
-	}
-	return m, tea.Batch(cmd, intentCmd)
+	return m, m.active.Update(msg)
 }
 
-// handleIntent coordinates navigation and application operations. Screens never
-// receive the root model or invoke services themselves.
-func (m *model) handleIntent(intent screenIntent) tea.Cmd {
-	switch intent := intent.(type) {
-	case startProxyIntent:
-		m.error, m.notice = "", ""
-		if m.running != nil {
-			m.active = m.runningView
-			return nil
+func (m *model) handleResize(msg tea.WindowSizeMsg) {
+	m.width, m.height = msg.Width, msg.Height
+	for _, component := range []screenComponent{m.menu, m.form, m.distributions, m.diagnostics, m.runningView} {
+		component.Resize(msg.Width, msg.Height)
+	}
+}
+
+func (m *model) handleDistributionsLoaded(msg distributionsMsg) {
+	if msg.err != nil {
+		m.error = msg.err.Error()
+		return
+	}
+	m.distributions.SetNames(msg.names, m.width, m.height)
+	if len(msg.names) == 0 {
+		m.error = "No WSL distributions found. Install a distribution and refresh with R."
+	}
+}
+
+func (m *model) handleTick() tea.Cmd {
+	if m.running != nil && m.busy == "" {
+		select {
+		case <-m.running.Server.Done():
+			message := fmt.Sprintf("HTTP server stopped: %v", m.running.Server.Err())
+			cmd := m.StopProxy()
+			m.error = message
+			return tea.Batch(cmd, tick())
+		default:
 		}
-		return m.start()
-	case openFormIntent:
-		m.error, m.notice = "", ""
-		m.active = m.form
-		return m.form.open(m.config)
-	case chooseDistributionIntent:
-		if !intent.forForm {
-			m.error, m.notice = "", ""
+	}
+	return tick()
+}
+
+func (m *model) handleGlobalKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	key := msg.String()
+	if key == "ctrl+c" {
+		if m.cancel != nil {
+			m.cancel()
 		}
-		m.distributions.open(intent.forForm)
-		m.active = m.distributions
-		return m.loadDistributions()
-	case diagnoseIntent:
-		if m.active == m.menu {
-			m.error, m.notice = "", ""
-		}
-		m.active = m.diagnostics
-		return m.diagnose()
-	case quitIntent:
-		m.error, m.notice = "", ""
-		return tea.Quit
-	case refreshDistributionsIntent:
+		return tea.Quit, true
+	}
+	if m.busy != "" {
+		return nil, true
+	}
+	if key == "esc" {
+		m.setActive(m.menu)
 		m.error = ""
-		return m.loadDistributions()
-	case distributionSelectedIntent:
-		if intent.forForm {
-			m.active = m.form
-			return m.form.selectDistribution(intent.name)
-		}
-		cfg := m.config
-		cfg.Distribution = intent.name
-		return m.save(cfg)
-	case saveConfigIntent:
-		return m.save(intent.config)
-	case showErrorIntent:
-		m.error = intent.err.Error()
-	case stopProxyIntent:
-		return m.stop()
+		return nil, true
 	}
-	return nil
+	return nil, false
 }
 
-func (m *model) operationContext(label string) (context.Context, int) {
+func (m *model) StartProxy() tea.Cmd {
+	m.error, m.notice = "", ""
+	if m.running != nil {
+		m.setActive(m.runningView)
+		return nil
+	}
+	return m.start()
+}
+
+func (m *model) OpenForm() tea.Cmd {
+	m.error, m.notice = "", ""
+	m.setActive(m.form)
+	return m.form.Open(m.config)
+}
+
+func (m *model) ChooseDistribution(forForm bool) tea.Cmd {
+	if !forForm {
+		m.error, m.notice = "", ""
+	}
+	m.distributions.Open(forForm)
+	m.setActive(m.distributions)
+	return m.loadDistributions()
+}
+
+func (m *model) Diagnose() tea.Cmd {
+	if m.active == m.menu {
+		m.error, m.notice = "", ""
+	}
+	m.setActive(m.diagnostics)
+	return m.diagnose()
+}
+
+func (m *model) Quit() tea.Cmd {
+	m.error, m.notice = "", ""
+	return tea.Quit
+}
+
+func (m *model) RefreshDistributions() tea.Cmd {
 	m.error = ""
-	m.busy = label
-	m.operation++
-	ctx, cancel := context.WithCancel(m.ctx)
-	m.cancel = cancel
-	return ctx, m.operation
+	return m.loadDistributions()
 }
-func (m *model) start() tea.Cmd {
-	ctx, operationID := m.operationContext("Resolving WSL, checking TCP and opening Windows listener...")
-	service := m.service
-	return func() tea.Msg {
-		running, report, err := service.Start(ctx)
-		return operationMsg{id: operationID, running: running, report: report, err: err}
+
+func (m *model) SelectDistribution(name string, forForm bool) tea.Cmd {
+	if forForm {
+		m.setActive(m.form)
+		return m.form.SelectDistribution(name)
 	}
+	cfg := m.config
+	cfg.Distribution = name
+	return m.SaveConfig(cfg)
 }
-func (m *model) stop() tea.Cmd {
-	_, operationID := m.operationContext("Stopping HTTP server...")
-	service := m.service
-	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		err := service.Stop(ctx)
-		return operationMsg{id: operationID, stopped: true, err: err}
-	}
-}
-func (m *model) diagnose() tea.Cmd {
-	ctx, operationID := m.operationContext("Checking WSL addresses and TCP connectivity...")
-	service, cfg := m.service, m.config
-	return func() tea.Msg {
-		report, err := service.Diagnose(ctx, cfg)
-		return operationMsg{id: operationID, report: report, err: err}
-	}
-}
-func (m *model) save(cfg config.Config) tea.Cmd {
-	ctx, operationID := m.operationContext("Validating and saving configuration...")
-	service := m.service
-	return func() tea.Msg {
-		err := cfg.Validate()
-		if err == nil {
-			err = service.WSL.CheckDistribution(ctx, cfg.Distribution)
-		}
-		if err == nil {
-			err = ctx.Err()
-		}
-		if err == nil {
-			err = service.Store.Save(cfg)
-		}
-		return operationMsg{id: operationID, saved: &cfg, err: err}
-	}
+
+func (m *model) ShowError(err error) tea.Cmd {
+	m.error = err.Error()
+	return nil
 }
