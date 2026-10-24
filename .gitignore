@@ -1,4 +1,5 @@
-/bin/
+/bin/*
+!/bin/proxy.exe
 /.idea/
 *.test
 coverage.out
