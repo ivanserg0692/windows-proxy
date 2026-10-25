@@ -5,9 +5,10 @@ import (
 	"strings"
 	"text/template"
 
+	"wslproxy/internal/tui/layout"
+
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
-	"wslproxy/internal/tui/layout"
 )
 
 type item string
@@ -52,7 +53,7 @@ func (menu *Menu) Update(msg tea.Msg) tea.Cmd {
 		if key.String() == "enter" {
 			switch menu.choices.Index() {
 			case 0:
-				return menu.receiver.StartProxy()
+				return menu.receiver.ToggleProxy()
 			case 1:
 				return menu.receiver.OpenForm()
 			case 2:
@@ -74,7 +75,7 @@ func (menu *Menu) Help() string { return "Up/Down: select   Enter: open   Ctrl+C
 
 func menuNote(snapshot Snapshot) string {
 	if snapshot.ProxyActive {
-		return muted.Render("Proxy remains active. Start proxy opens its status.")
+		return muted.Render("Proxy remains active. Stop proxy stops it and releases the port.")
 	}
 	return ""
 }
@@ -86,6 +87,13 @@ func (menu *Menu) Resize(area layout.Size, snapshot Snapshot) {
 
 func (menu *Menu) calculateLayout(snapshot Snapshot) {
 	area := menu.area
+	label := "Start proxy"
+	if snapshot.ProxyActive {
+		label = "Stop proxy"
+	}
+	if menu.choices.Items()[0].(item) != item(label) {
+		menu.choices.SetItem(0, item(label))
+	}
 	note := menuNote(snapshot)
 	_, size := layout.Measure(note, area.Width)
 	// Keep the selected item visible before admitting explanatory text.

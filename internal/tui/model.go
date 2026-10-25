@@ -159,11 +159,10 @@ func (m *model) handleGlobalKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
 	return nil, false
 }
 
-func (m *model) StartProxy() tea.Cmd {
+func (m *model) ToggleProxy() tea.Cmd {
 	m.error, m.notice = "", ""
 	if m.running != nil {
-		m.setActive(m.runningView)
-		return nil
+		return m.StopProxy()
 	}
 	return m.start()
 }

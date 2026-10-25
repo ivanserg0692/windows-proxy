@@ -7,7 +7,7 @@ import (
 
 // MenuReceiver coordinates application actions requested by the menu.
 type MenuReceiver interface {
-	StartProxy() tea.Cmd
+	ToggleProxy() tea.Cmd
 	OpenForm() tea.Cmd
 	ChooseDistribution(forForm bool) tea.Cmd
 	Diagnose() tea.Cmd

@@ -61,6 +61,35 @@ func TestDistributionSelectionPreservesFormDraftAndFocus(t *testing.T) {
 	}
 }
 
+func TestMenuStartFailureKeepsStartAndAllowsRetry(t *testing.T) {
+	m := newTestModel(t)
+	for attempt := 0; attempt < 2; attempt++ {
+		cmd := press(m, tea.KeyEnter)
+		if cmd == nil || m.busy == "" {
+			t.Fatal("menu did not begin start")
+		}
+		// The default configuration has no selected distribution, so starting fails.
+		result, ok := cmd().(proxyStartedMsg)
+		if !ok || result.err == nil {
+			t.Fatalf("expected failed start: %+v", result)
+		}
+		m.Update(result)
+		body := m.View().Content
+		if m.running != nil || m.busy != "" || m.active != m.menu || !strings.Contains(body, "Start proxy") || strings.Contains(body, "Stop proxy") {
+			t.Fatalf("failed start changed menu state: %q", body)
+		}
+	}
+	press(m, tea.KeyDown)
+	press(m, tea.KeyEnter)
+	if m.active != m.form {
+		t.Fatal("configuration navigation failed after start error")
+	}
+	press(m, tea.KeyEscape)
+	if m.active != m.menu {
+		t.Fatal("Escape did not return to menu")
+	}
+}
+
 func TestEscapeFromSelectorDiscardsFormOnReopen(t *testing.T) {
 	uiModel := newTestModel(t)
 	press(uiModel, tea.KeyDown)

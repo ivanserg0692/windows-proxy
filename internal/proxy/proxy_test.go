@@ -222,7 +222,9 @@ func TestConcurrentRequestsAndStopReleasesPort(t *testing.T) {
 	defer upstream.Close()
 	cfg := testConfig(t, upstream.Listener.Addr().String())
 	server := startTestProxy(t, cfg)
-	client := &http.Client{Timeout: 5 * time.Second}
+	transport := &http.Transport{}
+	t.Cleanup(transport.CloseIdleConnections)
+	client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
 	var wg sync.WaitGroup
 	for i := 0; i < 64; i++ {
 		wg.Add(1)
@@ -241,6 +243,9 @@ func TestConcurrentRequestsAndStopReleasesPort(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+	// Concurrent requests can race with speculative dials. Close unused client
+	// connections so Shutdown does not wait for their first-request timeout.
+	client.CloseIdleConnections()
 	if server.Snapshot().Requests != 64 {
 		t.Fatalf("stats: %+v", server.Snapshot())
 	}

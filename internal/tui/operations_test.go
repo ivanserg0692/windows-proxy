@@ -235,39 +235,55 @@ func TestOperationCommandsSaveDiagnoseStartAndStop(t *testing.T) {
 		t.Fatalf("diagnostic result: %+v", diagnosed)
 	}
 	m.Update(diagnosed)
-	start := m.start()
-	started, ok := start().(proxyStartedMsg)
-	if !ok || started.id != m.operation || started.err != nil || started.running == nil {
-		t.Fatalf("start result: %+v", started)
+	var started proxyStartedMsg
+	for cycle := 0; cycle < 3; cycle++ {
+		if body := m.View().Content; !strings.Contains(body, "Start proxy") || strings.Contains(body, "Stop proxy") {
+			t.Fatalf("cycle %d: menu does not offer Start: %q", cycle, body)
+		}
+		start := press(m, tea.KeyEnter)
+		if start == nil {
+			t.Fatal("menu did not request start")
+		}
+		started, ok = start().(proxyStartedMsg)
+		if !ok || started.id != m.operation || started.err != nil || started.running == nil {
+			t.Fatalf("start result: %+v", started)
+		}
+		m.Update(started)
+		if m.running != started.running || m.active != m.runningView {
+			t.Fatal("start result did not activate the proxy status")
+		}
+		if body := m.View().Content; !strings.Contains(body, "RUNNING") {
+			t.Fatal("running proxy is not rendered")
+		}
+		press(m, tea.KeyEscape)
+		if body := m.View().Content; !strings.Contains(body, "Stop proxy") || strings.Contains(body, "Start proxy") || m.active != m.menu {
+			t.Fatalf("cycle %d: menu does not offer Stop: %q", cycle, body)
+		}
+		stop := press(m, tea.KeyEnter)
+		if stop == nil {
+			t.Fatal("menu did not request stop")
+		}
+		// Graceful shutdown has its own context and must finish even if the UI is canceled.
+		m.cancel()
+		stopped, ok := stop().(proxyStoppedMsg)
+		if !ok || stopped.id != m.operation || stopped.err != nil {
+			t.Fatalf("stop result: %+v", stopped)
+		}
+		m.Update(stopped)
+		if m.running != nil || m.active != m.menu || m.cancel != nil || m.busy != "" {
+			t.Fatal("stop did not release the proxy and operation state")
+		}
+		select {
+		case <-started.running.Server.Done():
+		default:
+			t.Fatal("stop left the server running")
+		}
+		released, err := net.Listen("tcp4", cfg.ListenEndpoint())
+		if err != nil {
+			t.Fatalf("stop did not release the listener: %v", err)
+		}
+		released.Close()
 	}
-	m.Update(started)
-	if m.running != started.running || m.active != m.runningView {
-		t.Fatal("start result did not activate the proxy status")
-	}
-	if body := m.View().Content; !strings.Contains(body, "RUNNING") {
-		t.Fatal("running proxy is not rendered")
-	}
-	stop := m.StopProxy()
-	// Graceful shutdown has its own context and must finish even if the UI is canceled.
-	m.cancel()
-	stopped, ok := stop().(proxyStoppedMsg)
-	if !ok || stopped.id != m.operation || stopped.err != nil {
-		t.Fatalf("stop result: %+v", stopped)
-	}
-	m.Update(stopped)
-	if m.running != nil || m.active != m.menu || m.cancel != nil || m.busy != "" {
-		t.Fatal("stop did not release the proxy and operation state")
-	}
-	select {
-	case <-started.running.Server.Done():
-	default:
-		t.Fatal("stop left the server running")
-	}
-	released, err := net.Listen("tcp4", cfg.ListenEndpoint())
-	if err != nil {
-		t.Fatalf("stop did not release the listener: %v", err)
-	}
-	released.Close()
 
 	// Model a server that finished before the UI observed its termination.
 	m.running = started.running

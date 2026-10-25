@@ -65,10 +65,7 @@ func TestMenuAndEscapeKeepProxyActive(t *testing.T) {
 	if !strings.Contains(uiModel.View().Content, "Proxy remains active") {
 		t.Fatal("menu lost the active proxy notice")
 	}
-	if cmd := press(uiModel, tea.KeyEnter); cmd != nil || uiModel.running != running || uiModel.active != uiModel.runningView || uiModel.busy != "" {
-		t.Fatal("opening active proxy status started another operation")
-	}
-	if cmd := press(uiModel, 'S'); cmd == nil || uiModel.busy != "Stopping HTTP server..." {
-		t.Fatal("status did not synchronously request stop")
+	if cmd := press(uiModel, tea.KeyEnter); cmd == nil || uiModel.running != running || uiModel.active != uiModel.menu || uiModel.busy != "Stopping HTTP server..." {
+		t.Fatal("menu did not synchronously request stop")
 	}
 }

@@ -73,6 +73,9 @@ Unicode borders and text, without icon fonts. Use arrows and Enter in menus.
    configuration, WSL distribution selection and connection diagnostics.
    **Start proxy** reloads saved settings, resolves and tests the WSL target,
    then opens the Windows listener and switches to the running proxy screen.
+   After a successful start, the first item becomes **Stop proxy**; selecting it
+   stops the proxy and releases the port. Once stopped, **Start proxy** returns.
+   A failed start leaves **Start proxy** available.
    **Exit** or Ctrl+C stops the application.
 
 2. **Configure proxy** edits the Windows IPv4 listen address and port, WSL
@@ -97,7 +100,10 @@ Unicode borders and text, without icon fonts. Use arrows and Enter in menus.
    ![Successful TCP diagnostics showing the selected WSL address and interface](docs/images/connectionDiagnosticsScreen.png)
 
 5. **Running proxy** shows the Windows listener, WSL distribution and upstream,
-   request, retry and failure counters, and recent events. **S** gracefully stops
+   request, retry and failure counters, and recent events. **Active connections**
+   counts open incoming client TCP connections, including idle keep-alive
+   connections and those waiting for a response. It updates once per second and
+   reaches zero after all connections close on stop. **S** gracefully stops
    the server and releases the port. **Esc** returns to the menu while the proxy
    keeps running.
 
@@ -211,6 +217,15 @@ Run the Linux tests with the race detector and `go vet` from Windows:
 .\build.cmd test
 .\build.cmd
 ```
+
+From WSL Ubuntu, run the same Docker-based checks with:
+
+```bash
+./test.sh
+```
+
+The script delegates to `build.sh test` and can also be invoked by its path from
+another working directory. It uses the existing Go image and dependency caches.
 
 Tests cover strict config parsing, replacement and concurrent saves, validation,
 WSL encodings and command arguments, route/interface selection, manual TCP probes,

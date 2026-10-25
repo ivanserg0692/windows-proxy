@@ -31,8 +31,8 @@ func (r *recordingReceiver) record(action string) tea.Cmd {
 	r.calls = append(r.calls, action)
 	return r.cmd
 }
-func (r *recordingReceiver) StartProxy() tea.Cmd { return r.record("start") }
-func (r *recordingReceiver) OpenForm() tea.Cmd   { return r.record("form") }
+func (r *recordingReceiver) ToggleProxy() tea.Cmd { return r.record("toggle") }
+func (r *recordingReceiver) OpenForm() tea.Cmd    { return r.record("form") }
 func (r *recordingReceiver) ChooseDistribution(forForm bool) tea.Cmd {
 	r.forForm = forForm
 	return r.record("choose")
@@ -157,6 +157,40 @@ func TestRunningScreenRefreshesActiveConnections(t *testing.T) {
 	}
 }
 
+func TestMenuProxyLabelPreservesSelectionAndNavigation(t *testing.T) {
+	menu := NewMenu(&recordingReceiver{})
+	area := layout.Size{Width: 80, Height: 20}
+	for selected := range menuItems {
+		menu.choices.Select(selected)
+		for _, active := range []bool{false, true, false, true, false} {
+			snapshot := Snapshot{ProxyActive: active}
+			menu.Resize(area, snapshot)
+			want := "Start proxy"
+			if active {
+				want = "Stop proxy"
+			}
+			if label := menu.choices.Items()[0].(item).Title(); label != want {
+				t.Fatalf("active=%v: label=%q, want %q", active, label, want)
+			}
+			if menu.choices.Index() != selected || len(menu.choices.Items()) != len(menuItems) {
+				t.Fatal("proxy state changed menu selection or item count")
+			}
+			if body := menu.View(snapshot).Body; !strings.Contains(body, want) {
+				t.Fatalf("menu did not render %q: %q", want, body)
+			}
+		}
+	}
+	menu.choices.Select(0)
+	menu.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	if menu.choices.Index() != 1 {
+		t.Fatal("Down did not select configuration")
+	}
+	menu.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	if menu.choices.Index() != 0 {
+		t.Fatal("Up did not return to the proxy action")
+	}
+}
+
 func TestFormDistributionSelectionRetainsFocusAndDraft(t *testing.T) {
 	cfg := config.Default()
 	cfg.Distribution = "Ubuntu"
@@ -200,7 +234,7 @@ func TestDistributionScreensOwnSelectionAndReportItsPurpose(t *testing.T) {
 }
 
 func TestScreensReturnReceiverCommandsWithoutExecutingThem(t *testing.T) {
-	for _, action := range []string{"start", "form", "choose", "diagnose", "quit", "refresh", "stop", "stop uppercase", "rerun"} {
+	for _, action := range []string{"toggle", "form", "choose", "diagnose", "quit", "refresh", "stop", "stop uppercase", "rerun"} {
 		t.Run(action, func(t *testing.T) {
 			executed := false
 			receiver := &recordingReceiver{cmd: func() tea.Msg { executed = true; return action }}
@@ -221,7 +255,7 @@ func TestScreensReturnReceiverCommandsWithoutExecutingThem(t *testing.T) {
 				cmd = NewDiagnostics(receiver).Update(tea.KeyPressMsg{Code: 'r'})
 			default:
 				menu := NewMenu(receiver)
-				for index, name := range []string{"start", "form", "choose", "diagnose", "quit"} {
+				for index, name := range []string{"toggle", "form", "choose", "diagnose", "quit"} {
 					if name == action {
 						menu.choices.Select(index)
 						break
