@@ -18,14 +18,15 @@ import (
 )
 
 type Server struct {
-	http      *http.Server
-	transport *transport
-	listener  net.Listener
-	stats     *Stats
-	done      chan struct{}
-	mu        sync.Mutex
-	err       error
-	cancel    context.CancelFunc
+	http        *http.Server
+	transport   *transport
+	listener    net.Listener
+	stats       *Stats
+	done        chan struct{}
+	mu          sync.Mutex
+	err         error
+	cancel      context.CancelFunc
+	connections sync.WaitGroup
 }
 
 func Start(cfg config.Config, ip netip.Addr, resolve ResolveFunc, logger *slog.Logger) (*Server, error) {
@@ -63,6 +64,7 @@ func Start(cfg config.Config, ip netip.Addr, resolve ResolveFunc, logger *slog.L
 	server.http = &http.Server{
 		ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 1024 * 1024,
 		BaseContext: func(net.Listener) context.Context { return baseCtx },
+		ConnState:   server.connectionState,
 		ErrorLog:    log.New(&logWriter{logger: logger}, "", 0),
 		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			stats.requests.Add(1)
@@ -104,6 +106,17 @@ func (s *Server) Done() <-chan struct{} { return s.done }
 func (s *Server) Err() error            { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
 func (s *Server) Address() string       { return s.listener.Addr().String() }
 
+func (s *Server) connectionState(_ net.Conn, state http.ConnState) {
+	switch state {
+	case http.StateNew:
+		s.connections.Add(1)
+		s.stats.activeConnections.Add(1)
+	case http.StateClosed:
+		s.stats.activeConnections.Add(-1)
+		s.connections.Done()
+	}
+}
+
 func (s *Server) Stop(ctx context.Context) error {
 	err := s.http.Shutdown(ctx)
 	if err != nil {
@@ -113,6 +126,9 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.cancel()
 	s.transport.close()
 	<-s.done
+	// Serve has finished accepting connections. Wait for all closed-state hooks,
+	// which can still be running after Shutdown or Close returns.
+	s.connections.Wait()
 	return err
 }
 

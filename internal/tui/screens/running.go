@@ -5,9 +5,10 @@ import (
 	"strings"
 	"text/template"
 
+	"wslproxy/internal/tui/layout"
+
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"wslproxy/internal/tui/layout"
 )
 
 // The live server remains owned by the root. This screen only renders snapshots.
@@ -34,6 +35,7 @@ var runningTemplate = template.Must(template.New("running").Parse(`{{if .Stats}}
 WSL:      {{.Distribution}}
 Upstream: {{.Upstream}}:{{.Port}}
 
+Active connections: {{.ActiveConnections}}
 Requests: {{.Requests}}
 Retries:  {{.Retries}}
 Failures: {{.Failures}}{{end}}{{define "events"}}{{range $index, $event := .}}{{if $index}}
@@ -43,6 +45,7 @@ type runningStatsData struct {
 	Endpoint, Distribution, Upstream string
 	Port                             int
 	Requests, Retries, Failures      uint64
+	ActiveConnections                int64
 }
 type runningViewData struct{ Stats, EventHeading, Events string }
 type runningLayout struct {
@@ -54,7 +57,9 @@ func (running *Running) prepareViewData(snapshot Snapshot) runningViewData {
 	data := runningViewData{}
 	if snapshot.Running != nil {
 		cfg, stats := snapshot.Running.Config, snapshot.Running.Stats
-		values := runningStatsData{Endpoint: cfg.ListenEndpoint(), Distribution: safe(cfg.Distribution), Upstream: stats.Upstream, Port: cfg.TargetPort, Requests: stats.Requests, Retries: stats.Retries, Failures: stats.Failures}
+		values := runningStatsData{Endpoint: cfg.ListenEndpoint(), Distribution: safe(cfg.Distribution),
+			Upstream: stats.Upstream, Port: cfg.TargetPort, ActiveConnections: stats.ActiveConnections,
+			Requests: stats.Requests, Retries: stats.Retries, Failures: stats.Failures}
 		var content bytes.Buffer
 		if err := runningTemplate.ExecuteTemplate(&content, "stats", values); err != nil {
 			panic("render running stats template: " + err.Error())

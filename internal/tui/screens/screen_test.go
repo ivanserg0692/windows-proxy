@@ -2,6 +2,7 @@ package screens
 
 import (
 	"bytes"
+	"fmt"
 	"net/netip"
 	"strings"
 	"testing"
@@ -122,10 +123,10 @@ func TestRunningScreenUsesValueSnapshotAndAvailableEventSpace(t *testing.T) {
 	cfg := config.Default()
 	cfg.Distribution = "Ubuntu"
 	content := running.View(Snapshot{
-		Running:      &RunningSnapshot{Config: cfg, Stats: proxy.Snapshot{Upstream: "172.28.1.4", Requests: 12, Retries: 3, Failures: 2}},
+		Running:      &RunningSnapshot{Config: cfg, Stats: proxy.Snapshot{Upstream: "172.28.1.4", ActiveConnections: 5, Requests: 12, Retries: 3, Failures: 2}},
 		RecentEvents: []string{"oldest event", "second event", "third event", "last event"},
 	})
-	for _, expected := range []string{"Ubuntu", "172.28.1.4", "Requests: 12", "Retries:  3", "Failures: 2"} {
+	for _, expected := range []string{"Ubuntu", "172.28.1.4", "Active connections: 5", "Requests: 12", "Retries:  3", "Failures: 2"} {
 		if !strings.Contains(content.Body, expected) {
 			t.Fatalf("status is missing %q: %q", expected, content.Body)
 		}
@@ -140,6 +141,19 @@ func TestRunningScreenUsesValueSnapshotAndAvailableEventSpace(t *testing.T) {
 			t.Fatalf("missing or out-of-order event %q: %q", event, content.Body)
 		}
 		previous = position
+	}
+}
+
+func TestRunningScreenRefreshesActiveConnections(t *testing.T) {
+	running := NewRunning(nil)
+	running.Resize(layout.Size{Width: 80, Height: 20}, Snapshot{})
+	snapshot := Snapshot{Running: &RunningSnapshot{Config: config.Default()}}
+	for _, count := range []int64{0, 8, 3, 0} {
+		snapshot.Running.Stats.ActiveConnections = count
+		body := running.View(snapshot).Body
+		if want := fmt.Sprintf("Active connections: %d", count); !strings.Contains(body, want) {
+			t.Fatalf("missing %q in %q", want, body)
+		}
 	}
 }
 
