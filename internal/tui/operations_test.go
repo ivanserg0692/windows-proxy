@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"wslproxy/internal/app"
 	"wslproxy/internal/config"
+	"wslproxy/internal/tui/layout"
 	"wslproxy/internal/tui/screens"
 	"wslproxy/internal/wsl"
 )
@@ -60,6 +61,7 @@ func TestTypedOperationResults(t *testing.T) {
 						id--
 					}
 					m.Update(operation.result(id, outcome.err))
+					m.diagnostics.Resize(layout.Size{Width: 60, Height: 20}, screens.Snapshot{Config: m.config})
 					body := m.diagnostics.View(screens.Snapshot{Config: m.config}).Body
 					if stale {
 						if m.busy != "working" || ctx.Err() != nil || m.cancel == nil || m.error != "" || m.notice != "previous notice" || m.config != originalConfig || m.running != originalRunning || m.active != m.form || !strings.Contains(body, previousReport.Selected.String()) {

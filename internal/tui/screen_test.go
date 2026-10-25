@@ -8,6 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"wslproxy/internal/app"
+	"wslproxy/internal/tui/layout"
 	"wslproxy/internal/tui/screens"
 )
 
@@ -38,12 +39,14 @@ func TestDiagnosticResultsAreDeliveredOffscreenAndResetBySave(t *testing.T) {
 	if uiModel.active != uiModel.menu || uiModel.busy != "" || !canceled || uiModel.cancel != nil {
 		t.Fatal("background result changed navigation or left its operation active")
 	}
+	uiModel.diagnostics.Resize(layout.Size{Width: 60, Height: 20}, screens.Snapshot{Config: uiModel.config})
 	if !strings.Contains(uiModel.diagnostics.View(screens.Snapshot{Config: uiModel.config}).Body, "Selected: "+selected.String()) || uiModel.error != "partial report" {
 		t.Fatal("background diagnostic report was lost")
 	}
 	saved := uiModel.config
 	saved.Distribution = "Debian"
 	uiModel.Update(configSavedMsg{id: 1, config: saved})
+	uiModel.diagnostics.Resize(layout.Size{Width: 60, Height: 20}, screens.Snapshot{Config: uiModel.config})
 	if uiModel.config != saved || strings.Contains(uiModel.diagnostics.View(screens.Snapshot{Config: uiModel.config}).Body, "Selected:") || uiModel.active != uiModel.menu {
 		t.Fatal("save result did not update configuration and clear the old report")
 	}

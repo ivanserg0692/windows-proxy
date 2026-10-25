@@ -9,6 +9,8 @@ import (
 	"wslproxy/internal/config"
 )
 
+const proxyStopTimeout = 5 * time.Second
+
 type configSavedMsg struct {
 	id     int
 	config config.Config
@@ -121,7 +123,7 @@ func (m *model) StopProxy() tea.Cmd {
 	_, operationID := m.operationContext("Stopping HTTP server...")
 	service := m.service
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), proxyStopTimeout)
 		defer cancel()
 		err := service.Stop(ctx)
 		return proxyStoppedMsg{id: operationID, err: err}

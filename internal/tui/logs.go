@@ -8,6 +8,11 @@ import (
 	"unicode"
 )
 
+const (
+	maxLogLineBytes     = 1000
+	maxBufferedLogLines = 8
+)
+
 type Logs struct {
 	mu    sync.Mutex
 	lines []string
@@ -33,14 +38,14 @@ func (h *logHandler) Handle(_ context.Context, record slog.Record) error {
 		line += " " + h.group + attr.Key + "=" + attr.Value.String()
 	}
 	line = safe(line)
-	if len(line) > 1000 {
-		line = line[:1000]
+	if len(line) > maxLogLineBytes {
+		line = line[:maxLogLineBytes]
 	}
 	h.logs.mu.Lock()
 	defer h.logs.mu.Unlock()
 	h.logs.lines = append(h.logs.lines, line)
-	if len(h.logs.lines) > 8 {
-		h.logs.lines = h.logs.lines[len(h.logs.lines)-8:]
+	if len(h.logs.lines) > maxBufferedLogLines {
+		h.logs.lines = h.logs.lines[len(h.logs.lines)-maxBufferedLogLines:]
 	}
 	return nil
 }

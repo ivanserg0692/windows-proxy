@@ -19,8 +19,7 @@ type RunningSnapshot struct {
 	Stats  proxy.Snapshot
 }
 
+// Content contains the screen body, bounded by its allocated area.
 type Content struct {
-	Body   string
-	Help   string
-	Footer string
+	Body string
 }

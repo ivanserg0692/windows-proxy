@@ -14,6 +14,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+const (
+	defaultTerminalWidth  = 80
+	defaultTerminalHeight = 30
+)
+
 type model struct {
 	ctx           context.Context
 	service       *app.Service
@@ -26,6 +31,7 @@ type model struct {
 	runningView   *screens.Running
 	active        screenComponent
 	width, height int
+	presentation  viewData
 	busy          string
 	cancel        context.CancelFunc
 	operation     int
@@ -44,7 +50,7 @@ func New(ctx context.Context, service *app.Service, logs *Logs) tea.Model {
 	cfg, err := service.Store.Load()
 	uiModel := &model{
 		ctx: ctx, service: service, logs: logs, config: cfg,
-		width: 80, height: 30,
+		width: defaultTerminalWidth, height: defaultTerminalHeight,
 	}
 	uiModel.menu = screens.NewMenu(uiModel)
 	uiModel.form = screens.NewForm(uiModel)
@@ -61,6 +67,7 @@ func New(ctx context.Context, service *app.Service, logs *Logs) tea.Model {
 			uiModel.notice = "Saved config is invalid. Review all values before saving."
 		}
 	}
+	uiModel.refreshView()
 	return uiModel
 }
 
@@ -75,9 +82,10 @@ func (m *model) loadDistributions() tea.Cmd {
 }
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	defer m.refreshView()
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.handleResize(msg)
+		m.width, m.height = msg.Width, msg.Height
 		return m, nil
 	case distributionsMsg:
 		m.handleDistributionsLoaded(msg)
@@ -107,19 +115,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, m.active.Update(msg)
 }
 
-func (m *model) handleResize(msg tea.WindowSizeMsg) {
-	m.width, m.height = msg.Width, msg.Height
-	for _, component := range []screenComponent{m.menu, m.form, m.distributions, m.diagnostics, m.runningView} {
-		component.Resize(msg.Width, msg.Height)
-	}
-}
-
 func (m *model) handleDistributionsLoaded(msg distributionsMsg) {
 	if msg.err != nil {
 		m.error = msg.err.Error()
 		return
 	}
-	m.distributions.SetNames(msg.names, m.width, m.height)
+	m.distributions.SetNames(msg.names)
 	if len(msg.names) == 0 {
 		m.error = "No WSL distributions found. Install a distribution and refresh with R."
 	}

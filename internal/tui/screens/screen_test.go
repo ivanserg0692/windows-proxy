@@ -1,15 +1,18 @@
 package screens
 
 import (
+	"bytes"
 	"net/netip"
 	"strings"
 	"testing"
+	"text/template"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"wslproxy/internal/app"
 	"wslproxy/internal/config"
 	"wslproxy/internal/proxy"
+	"wslproxy/internal/tui/layout"
 	"wslproxy/internal/wsl"
 )
 
@@ -93,8 +96,8 @@ func TestFormReportsInvalidPortWithoutSaving(t *testing.T) {
 	}
 }
 
-func TestDiagnosticScreenRendersLimitedSafeReport(t *testing.T) {
-	diagnostics := &Diagnostics{}
+func TestDiagnosticScreenRendersAllSafeReportWhenItFits(t *testing.T) {
+	diagnostics := NewDiagnostics(nil)
 	report := app.Report{Selected: netip.MustParseAddr("172.28.1.4")}
 	for index := 0; index < 5; index++ {
 		report.Probes = append(report.Probes, app.Probe{
@@ -103,8 +106,9 @@ func TestDiagnosticScreenRendersLimitedSafeReport(t *testing.T) {
 		})
 	}
 	diagnostics.SetReport(report)
+	diagnostics.Resize(layout.Size{Width: 80, Height: 25}, Snapshot{Config: config.Default()})
 	content := diagnostics.View(Snapshot{Config: config.Default()})
-	if strings.Count(content.Body, "FAIL:") != 4 || !strings.Contains(content.Body, "More addresses found") || !strings.Contains(content.Body, "Selected: 172.28.1.4") {
+	if strings.Count(content.Body, "FAIL:") != 5 || !strings.Contains(content.Body, "Selected: 172.28.1.4") {
 		t.Fatalf("unexpected report: %q", content.Body)
 	}
 	if strings.ContainsAny(content.Body, "\x1b\x00") {
@@ -112,8 +116,9 @@ func TestDiagnosticScreenRendersLimitedSafeReport(t *testing.T) {
 	}
 }
 
-func TestRunningScreenUsesValueSnapshotAndLastThreeEvents(t *testing.T) {
-	running := &Running{}
+func TestRunningScreenUsesValueSnapshotAndAvailableEventSpace(t *testing.T) {
+	running := NewRunning(nil)
+	running.Resize(layout.Size{Width: 80, Height: 20}, Snapshot{})
 	cfg := config.Default()
 	cfg.Distribution = "Ubuntu"
 	content := running.View(Snapshot{
@@ -125,14 +130,14 @@ func TestRunningScreenUsesValueSnapshotAndLastThreeEvents(t *testing.T) {
 			t.Fatalf("status is missing %q: %q", expected, content.Body)
 		}
 	}
-	if strings.Contains(content.Footer, "oldest event") {
-		t.Fatalf("unexpected recent events: %q", content.Footer)
+	if !strings.Contains(content.Body, "oldest event") {
+		t.Fatalf("unexpected recent events: %q", content.Body)
 	}
 	previous := -1
-	for _, event := range []string{"second event", "third event", "last event"} {
-		position := strings.Index(content.Footer, event)
+	for _, event := range []string{"oldest event", "second event", "third event", "last event"} {
+		position := strings.Index(content.Body, event)
 		if position <= previous {
-			t.Fatalf("missing or out-of-order event %q: %q", event, content.Footer)
+			t.Fatalf("missing or out-of-order event %q: %q", event, content.Body)
 		}
 		previous = position
 	}
@@ -160,8 +165,10 @@ func TestFormDistributionSelectionRetainsFocusAndDraft(t *testing.T) {
 func TestDistributionScreensOwnSelectionAndReportItsPurpose(t *testing.T) {
 	receiver := &recordingReceiver{}
 	formSelector, menuSelector := NewDistributions(receiver), NewDistributions(receiver)
-	formSelector.SetNames([]string{"Ubuntu", "Debian"}, 80, 30)
-	menuSelector.SetNames([]string{"Ubuntu", "Debian"}, 80, 30)
+	formSelector.SetNames([]string{"Ubuntu", "Debian"})
+	menuSelector.SetNames([]string{"Ubuntu", "Debian"})
+	formSelector.Resize(layout.Size{Width: 60, Height: 20}, Snapshot{})
+	menuSelector.Resize(layout.Size{Width: 60, Height: 20}, Snapshot{})
 	formSelector.Open(true)
 	menuSelector.Open(false)
 	formSelector.Update(tea.KeyPressMsg{Code: tea.KeyDown})
@@ -213,6 +220,42 @@ func TestScreensReturnReceiverCommandsWithoutExecutingThem(t *testing.T) {
 			}
 			if cmd() != action || !executed {
 				t.Fatal("receiver command was lost")
+			}
+		})
+	}
+}
+
+// Template separators connect occupied blocks without adding empty rows. Data,
+// including ANSI and template delimiters, must be emitted literally.
+func TestScreenTemplatesOrderOptionalBlocks(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		tmpl *template.Template
+		data any
+		want string
+	}{
+		{"menu empty", menuTemplate, menuViewData{}, ""},
+		{"menu list", menuTemplate, menuViewData{List: "世界 {{.Note}}"}, "世界 {{.Note}}"},
+		{"menu note", menuTemplate, menuViewData{Note: "note"}, "note"},
+		{"menu both", menuTemplate, menuViewData{List: "list\nsecond", Note: "note"}, "list\nsecond\nnote"},
+		{"distributions list", distributionsTemplate, distributionsViewData{List: "Ubuntu"}, "Ubuntu"},
+		{"distributions both", distributionsTemplate, distributionsViewData{Title: "title", List: "Ubuntu"}, "title\nUbuntu"},
+		{"form input", formTemplate, formViewData{Fields: "field"}, "field"},
+		{"form counter", formTemplate, formViewData{Counter: "counter"}, "counter"},
+		{"form both", formTemplate, formViewData{Fields: "fields", Counter: "counter"}, "fields\ncounter"},
+		{"diagnostics results", diagnosticsTemplate, diagnosticsViewData{Probes: "result"}, "result"},
+		{"diagnostics both", diagnosticsTemplate, diagnosticsViewData{Heading: "heading", Probes: "result"}, "heading\nresult"},
+		{"running empty", runningTemplate, runningViewData{}, ""},
+		{"running stats", runningTemplate, runningViewData{Stats: "stats"}, "stats"},
+		{"running all", runningTemplate, runningViewData{Stats: "stats", EventHeading: "events", Events: "\x1b[31m世界\x1b[m"}, "stats\nevents\n\x1b[31m世界\x1b[m"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var content bytes.Buffer
+			if err := test.tmpl.Execute(&content, test.data); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.TrimSuffix(content.String(), "\n"); got != test.want {
+				t.Fatalf("got %q, want %q", got, test.want)
 			}
 		})
 	}

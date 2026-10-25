@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"wslproxy/internal/app"
+	"wslproxy/internal/tui/layout"
 	"wslproxy/internal/tui/screens"
 )
 
@@ -43,7 +44,8 @@ func (s *recordingScreen) Update(msg tea.Msg) tea.Cmd {
 }
 
 func (*recordingScreen) View(screens.Snapshot) screens.Content { return screens.Content{} }
-func (*recordingScreen) Resize(int, int)                       {}
+func (*recordingScreen) Help() string                          { return "help" }
+func (*recordingScreen) Resize(layout.Size, screens.Snapshot)  {}
 
 func TestUpdateRoutesOnlyUnhandledMessagesToActiveScreen(t *testing.T) {
 	for _, busy := range []string{"", "working"} {
@@ -154,6 +156,7 @@ func TestDistributionErrorsPreserveExistingChoices(t *testing.T) {
 	m.Update(distributionsMsg{names: []string{"Ubuntu"}})
 	m.busy = "working"
 	m.Update(distributionsMsg{err: errors.New("WSL unavailable")})
+	m.distributions.Resize(layout.Size{Width: 60, Height: 20}, screens.Snapshot{})
 	if m.error != "WSL unavailable" || !strings.Contains(m.distributions.View(screens.Snapshot{}).Body, "Ubuntu") {
 		t.Fatal("distribution error replaced choices or was lost while busy")
 	}

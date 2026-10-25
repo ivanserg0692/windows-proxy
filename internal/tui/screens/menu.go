@@ -1,8 +1,13 @@
 package screens
 
 import (
+	"bytes"
+	"strings"
+	"text/template"
+
 	"charm.land/bubbles/v2/list"
 	tea "charm.land/bubbletea/v2"
+	"wslproxy/internal/tui/layout"
 )
 
 type item string
@@ -18,7 +23,7 @@ func choiceList(names []string) list.Model {
 	}
 	delegate := list.NewDefaultDelegate()
 	delegate.ShowDescription = false
-	menu := list.New(items, delegate, 60, 8)
+	menu := list.New(items, delegate, 0, 0)
 	menu.SetShowTitle(false)
 	menu.SetShowStatusBar(false)
 	menu.SetShowHelp(false)
@@ -31,6 +36,9 @@ var menuItems = []string{"Start proxy", "Configure proxy", "Select WSL distribut
 
 // Menu owns selection; the root decides how to perform each action.
 type Menu struct {
+	area     layout.Size
+	listArea layout.Size
+	noteArea layout.Size
 	choices  list.Model
 	receiver MenuReceiver
 }
@@ -62,14 +70,50 @@ func (menu *Menu) Update(msg tea.Msg) tea.Cmd {
 	return nil
 }
 
-func (menu *Menu) Resize(width, height int) {
-	menu.choices.SetSize(max(20, min(64, width-8)), 7)
+func (menu *Menu) Help() string { return "Up/Down: select   Enter: open   Ctrl+C: exit" }
+
+func menuNote(snapshot Snapshot) string {
+	if snapshot.ProxyActive {
+		return muted.Render("Proxy remains active. Start proxy opens its status.")
+	}
+	return ""
+}
+
+func (menu *Menu) Resize(area layout.Size, snapshot Snapshot) {
+	menu.area = area
+	menu.calculateLayout(snapshot)
+}
+
+func (menu *Menu) calculateLayout(snapshot Snapshot) {
+	area := menu.area
+	note := menuNote(snapshot)
+	_, size := layout.Measure(note, area.Width)
+	// Keep the selected item visible before admitting explanatory text.
+	note = layout.Fit(note, layout.Size{Width: area.Width, Height: min(size.Height, max(0, area.Height-1))})
+	areas := layout.Column(area, layout.Block{Grow: true}, layout.Block{Text: note})
+	menu.listArea, menu.noteArea = areas[0], areas[1]
+	menu.choices.SetSize(max(1, areas[0].Width), max(1, areas[0].Height))
+}
+
+// Each occupied block ends with a template-owned separator. View removes
+// the final separator, preserving any padding inside the blocks themselves.
+var menuTemplate = template.Must(template.New("menu").Parse(`{{if .List}}{{.List}}
+{{end}}{{if .Note}}{{.Note}}
+{{end}}`))
+
+type menuViewData struct{ List, Note string }
+
+func (menu *Menu) prepareViewData(snapshot Snapshot) menuViewData {
+	return menuViewData{
+		List: layout.Fit(menu.choices.View(), menu.listArea),
+		Note: layout.Fit(menuNote(snapshot), menu.noteArea),
+	}
 }
 
 func (menu *Menu) View(snapshot Snapshot) Content {
-	body := menu.choices.View()
-	if snapshot.ProxyActive {
-		body += "\n" + muted.Render("Proxy remains active. Start proxy opens its status.")
+	var content bytes.Buffer
+	if err := menuTemplate.Execute(&content, menu.prepareViewData(snapshot)); err != nil {
+		panic("render menu template: " + err.Error())
 	}
-	return Content{Body: body, Help: "Up/Down: select   Enter: open   Ctrl+C: exit"}
+	return Content{Body: layout.Fit(strings.TrimSuffix(content.String(), "\n"), menu.area)}
 }

@@ -2,6 +2,7 @@ package tui
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"wslproxy/internal/tui/layout"
 	"wslproxy/internal/tui/screens"
 )
 
@@ -10,5 +11,6 @@ import (
 type screenComponent interface {
 	Update(tea.Msg) tea.Cmd
 	View(screens.Snapshot) screens.Content
-	Resize(width, height int)
+	Help() string
+	Resize(layout.Size, screens.Snapshot)
 }
