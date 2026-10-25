@@ -67,17 +67,41 @@ missing dependencies. Re-run the download command if a cache is removed.
 Open `proxy.exe` in Windows Terminal or PowerShell. The interface uses ordinary
 Unicode borders and text, without icon fonts. Use arrows and Enter in menus.
 
-1. Select **Select WSL distribution**. Enter saves the choice with current settings.
-2. Open **Configure proxy**. Set the Windows IPv4 listen address and port, WSL
+![WSL Proxy main menu with proxy status and keyboard shortcuts](docs/images/mainMenuScreen.png)
+
+1. **Main menu** (shown above) displays the proxy status and provides access to
+   configuration, WSL distribution selection and connection diagnostics.
+   **Start proxy** reloads saved settings, resolves and tests the WSL target,
+   then opens the Windows listener and switches to the running proxy screen.
+   **Exit** or Ctrl+C stops the application.
+
+2. **Configure proxy** edits the Windows IPv4 listen address and port, WSL
    target port, optional manual IPv4, connect timeout, retry count and delay.
    Tab/Shift+Tab or Up/Down changes fields. Enter on the distribution field opens
    the distribution list. **Ctrl+S** validates and saves; Esc discards form edits.
-3. Open **Connection diagnostics** to inspect Windows-to-WSL TCP probes. R repeats
-   diagnostics. No HTTP request is sent by this check.
-4. Choose **Start proxy**. Saved settings are reloaded; WSL is resolved and tested
-   before opening the Windows listener. The status screen shows actual counters.
-5. **S** gracefully stops the server and releases the port. **Esc** returns to the
-   menu while the proxy keeps running. **Exit** or Ctrl+C stops the application.
+
+   ![Proxy configuration form with connection settings and save shortcuts](docs/images/proxyConfigurationScreen.png)
+
+3. **Select WSL distribution** lists installed distributions. **R** refreshes the
+   list; Enter selects a distribution. When opened from the configuration form,
+   the selection updates the draft and returns to the form. When opened from the
+   menu, it is saved with the current settings.
+
+   ![WSL distribution selector listing Ubuntu and docker-desktop](docs/images/distributionSelectionScreen.png)
+
+4. **Connection diagnostics** shows the configured endpoints, candidate WSL IPs
+   and interfaces, TCP probe results and the selected target, when available.
+   **R** repeats diagnostics; PgUp/PgDown scrolls the results; Esc returns to the
+   menu. No HTTP request is sent by this check.
+
+   ![Successful TCP diagnostics showing the selected WSL address and interface](docs/images/connectionDiagnosticsScreen.png)
+
+5. **Running proxy** shows the Windows listener, WSL distribution and upstream,
+   request, retry and failure counters, and recent events. **S** gracefully stops
+   the server and releases the port. **Esc** returns to the menu while the proxy
+   keeps running.
+
+   ![Running proxy showing listener and upstream addresses, counters and recent events](docs/images/runningProxyScreen.png)
 
 Configuration changes affect the next proxy start. During an operation Ctrl+C
 cancels and exits. A forced stop follows a five-second graceful-shutdown limit.
